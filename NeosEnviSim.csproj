@@ -1,0 +1,104 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+	<PropertyGroup>
+		<!-- Select the framework(s) you wish to target.
+        Rhino 6: net45
+        Rhino 7: net48
+        Rhino 8 Windows: net48, net7.0, net7.0-windows, net7.0-windows10.0.22000.0, etc
+        Rhino 8 Mac: net7.0, net7.0-macos, net7.0-macos12.0, etc
+    -->
+		<TargetFrameworks>net7.0-windows;net7.0;net48</TargetFrameworks>
+		<EnableDynamicLoading>true</EnableDynamicLoading>
+		<TargetExt>.gha</TargetExt>
+		<NoWarn>NU1701;NETSDK1086</NoWarn>
+		<EnableWindowsTargeting>true</EnableWindowsTargeting>
+	</PropertyGroup>
+
+	<PropertyGroup>
+		<!-- Specifies information for Assembly and Yak -->
+		<Version>1.9.0.0</Version>
+		<Title>NeosEnviSim</Title>
+		<Company>Wahfai Wong (Huafei Huang)</Company>
+		<Description>Tools for building environment optimization</Description>
+		<RootNamespace>NeosEnviSim</RootNamespace>
+		<AssemblyTitle>NeosEnviSim</AssemblyTitle>
+		<ApplicationIcon>icon_NeosEnviSim.ico</ApplicationIcon>
+	</PropertyGroup>
+
+	<ItemGroup>
+		<PackageReference Include="Grasshopper" Version="8.0.23304.9001" ExcludeAssets="runtime" />
+		<PackageReference Include="MIConvexHull" Version="1.1.19.1019" />
+		<PackageReference Include="Microsoft.ML.OnnxRuntime" Version="1.24.2" />
+		<PackageReference Include="RhinoCommon" Version="8.5.24072.13001" />
+		<PackageReference Include="System.Resources.Extensions" Version="10.0.8" />
+		<PackageReference Include="System.Runtime.Extensions" Version="4.3.1" />
+		<PackageReference Include="System.Text.Json" Version="10.0.8" />
+	</ItemGroup>
+
+	<!-- For Windows only builds -->
+	<PropertyGroup Condition="$(TargetFramework.Contains('-windows')) or $(TargetFramework.StartsWith('net4'))">
+		<UseWindowsForms>true</UseWindowsForms>
+	</PropertyGroup>
+
+	<!-- Reference WinForms for .NET 7.0 on macOS -->
+	<ItemGroup Condition="!($(TargetFramework.Contains('-windows')) or $(TargetFramework.StartsWith('net4')))">
+		<!-- Rhino 8.11 and later you can use this -->
+		<!-- <FrameworkReference Include="Microsoft.WindowsDesktop.App.WindowsForms" /> -->
+
+		<!-- Rhino 8.10 and earlier -->
+		<PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies.net48" Version="1.0.3" ExcludeAssets="all" GeneratePathProperty="true" />
+		<Reference Include="$(PkgMicrosoft_NETFramework_ReferenceAssemblies_net48)\build\.NETFramework\v4.8\System.Windows.Forms.dll" Private="False" />
+		<PackageReference Include="System.Drawing.Common" Version="7.0.0" ExcludeAssets="runtime" />
+	</ItemGroup>
+	<ItemGroup>
+		<Compile Update="Properties\Resources.Designer.cs">
+			<DesignTime>True</DesignTime>
+			<AutoGen>True</AutoGen>
+			<DependentUpon>Resources.resx</DependentUpon>
+		</Compile>
+	</ItemGroup>
+	<ItemGroup>
+		<EmbeddedResource Update="Properties\Resources.resx">
+			<Generator>ResXFileCodeGenerator</Generator>
+			<LastGenOutput>Resources.Designer.cs</LastGenOutput>
+		</EmbeddedResource>
+	</ItemGroup>
+	<ItemGroup>
+		<EmbeddedResource Include="Resources\*" />
+	</ItemGroup>
+	<ItemGroup>
+	  <Compile Remove="Components\Utility\Point Grid.cs" />
+	</ItemGroup>
+	<ItemGroup>
+		<Content Include="icon_NeosEnviSim.ico" />
+	</ItemGroup>
+	<ItemGroup>
+		<Reference Include="Microsoft.Bcl.HashCode">
+			<HintPath>..\..\NeosCityDetector\NeosCityDetector1.2.0.1\bin\Release\Microsoft.Bcl.HashCode.dll</HintPath>
+		</Reference>
+		<Reference Include="Microsoft.ML.OnnxRuntime">
+			<HintPath>..\..\NeosCityDetector\NeosCityDetector1.2.0.1\packages\Microsoft.ML.OnnxRuntime.Managed.1.24.2\lib\net8.0\Microsoft.ML.OnnxRuntime.dll</HintPath>
+		</Reference>
+		<Reference Include="NAudio">
+			<HintPath>..\..\NeosAcoustic\NeosAcoustic1.1\bin\Release\net48\NAudio.dll</HintPath>
+		</Reference>
+		<Reference Include="NAudio.Core">
+			<HintPath>..\..\NeosAcoustic\NeosAcoustic1.1\bin\Release\net48\NAudio.Core.dll</HintPath>
+		</Reference>
+		<Reference Include="NAudio.Wasapi">
+			<HintPath>..\..\NeosAcoustic\NeosAcoustic1.1\bin\Release\net48\NAudio.Wasapi.dll</HintPath>
+		</Reference>
+		<Reference Include="System.Collections.Immutable">
+			<HintPath>..\..\NeosCityDetector\NeosCityDetector1.2.0.1\bin\Release\System.Collections.Immutable.dll</HintPath>
+		</Reference>
+		<Reference Include="System.Formats.Nrbf">
+			<HintPath>..\..\NeosCityDetector\NeosCityDetector1.2.0.1\bin\Release\System.Formats.Nrbf.dll</HintPath>
+		</Reference>
+		<Reference Include="System.Reflection.Metadata">
+			<HintPath>..\..\NeosCityDetector\NeosCityDetector1.2.0.1\bin\Release\System.Reflection.Metadata.dll</HintPath>
+		</Reference>
+		<Reference Include="System.Resources.Extensions">
+			<HintPath>..\..\NeosCityDetector\NeosCityDetector1.2.0.1\bin\Release\System.Resources.Extensions.dll</HintPath>
+		</Reference>
+	</ItemGroup>
+</Project>
