@@ -11,9 +11,7 @@ namespace SolarPV.Core
     /// References:
     /// [1] Dobos, A.P. (2012). PVWatts Version 5 Manual. NREL/TP-6A20-62641.
     ///     https://www.nrel.gov/docs/fy14osti/62641.pdf
-    /// [2] King, D.L., Boyson, W.E., & Kratochvil, J.A. (2004).
-    ///     Photovoltaic Array Performance Model. Sandia National Laboratories, SAND2004-3535.
-    /// [3] Nebenfuhr, D. (2015). Inverter Efficiency Curves. SolarPro Magazine, 8(3), 44-54.
+    /// [2] King, D.L., Boyson, W.E., & Kratochvil, J.A. (2004). Photovoltaic Array Performance Model. Sandia National Laboratories, SAND2004-3535.
     /// </summary>
     public static class InverterMPPTModel
     {

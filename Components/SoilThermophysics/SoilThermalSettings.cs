@@ -29,6 +29,7 @@ namespace SoilThermophysics
     ///   5 leMax     Maximum latent heat flux
     ///   6 sub       Sub-steps per hour
     ///   7 AirTemp   Air temperature override (optional, multi-mode tree)
+    ///   8 RH        Relative humidity override (optional, multi-mode tree)
     ///
     /// Output order:
     ///   0 SoilThermSet  Soil thermal configuration (includes air temperature settings)
@@ -40,7 +41,7 @@ namespace SoilThermophysics
           : base("Soil Thermal Settings", "SoilThermSet",
               "Configures soil thermal properties (Force-Restore) " +
               "and latent heat method (Simplified, Penman-Monteith, or No Latent Heat). " +
-              "Supports flexible air temperature input to override EPW values.",
+              "Supports flexible air temperature and relative humidity input to override EPW values.",
               "Neos", "Thermophysics")
         {
         }
@@ -90,14 +91,28 @@ namespace SoilThermophysics
                 GH_ParamAccess.tree);
             pManager[7].Optional = true;
 
-            for (int i = 0; i < 7; i++)
+            // ---- Relative humidity input (optional, last, supports multi-mode) ----
+            pManager.AddNumberParameter("Relative Humidity", "RH",
+                "Optional: relative humidity input [%] to override EPW RH. " +
+                "When AirTemp is overridden, also overriding RH ensures physical consistency " +
+                "between temperature, humidity, and vapor pressure deficit (VPD). " +
+                "Supports the same multi-mode input structure as AirTemp:" +
+                "- Single value: all points, all hours" +
+                "- Multiple values (count = nPts): per-point constant" +
+                "- 8760 values: hourly time series (all points share)" +
+                "- Tree {nPts}[nHours]: per-point per-hour time series." +
+                "\nLeave empty to use EPW relative humidity (default).",
+                GH_ParamAccess.tree);
+            pManager[8].Optional = true;
+
+            for (int i = 0; i < 8; i++)
                 pManager[i].Optional = true;
         }
 
         protected override void RegisterOutputParams(GH_OutputParamManager pManager)
         {
             pManager.AddGenericParameter("Soil Thermal Settings", "SoilThermSet",
-                "Soil thermal configuration (includes air temperature settings)", GH_ParamAccess.item);
+                "Soil thermal configuration (includes air temperature and RH settings)", GH_ParamAccess.item);
             pManager.AddTextParameter("Summary", "Sum",
                 "Parameter summary", GH_ParamAccess.item);
         }
@@ -158,6 +173,17 @@ namespace SoilThermophysics
 
             config.AirTemperatureConfig = airTempConfig;
 
+            // ---- Parse relative humidity input (port 8) ----
+            RelativeHumidityConfig rhConfig = ParseRelativeHumidityInput(DA, 8);
+
+            string rhModeDesc = rhConfig.Mode == RelativeHumidityMode.FromEPW ? "EPW (auto)"
+                : rhConfig.Mode == RelativeHumidityMode.SingleValue ? $"Single={rhConfig.SingleRelativeHumidity:F1}%"
+                : rhConfig.Mode == RelativeHumidityMode.PerPointConstant ? $"PerPoint ({rhConfig.PerPointRelativeHumidity.Count} pts)"
+                : rhConfig.Mode == RelativeHumidityMode.TimeSeries ? $"TimeSeries ({rhConfig.TimeSeriesRelativeHumidity.Count} hrs)"
+                : $"PerPointTimeSeries ({rhConfig.PerPointTimeSeriesRelativeHumidity.Count} pts)";
+
+            config.RelativeHumidityConfig = rhConfig;
+
             string summary = $"=== Soil Temperature Settings ===\n" +
                 $"Soil Type ............ {typeNames[soilType]}\n" +
                 $"Heat Capacity ........ {config.VolumetricHeatCapacity:F2} MJ/(m3*K)\n" +
@@ -166,7 +192,8 @@ namespace SoilThermophysics
                 $"LE Method ............ {lhNames[leMethod]}\n" +
                 $"Max LE ............... {leMax:F0} W/m2\n" +
                 $"Sub-steps/hour ....... {subSteps}\n" +
-                $"Air Temperature ...... {airTempModeDesc}";
+                $"Air Temperature ...... {airTempModeDesc}\n" +
+                $"Relative Humidity .... {rhModeDesc}";
 
             DA.SetData(0, new GH_ObjectWrapper(config));
             DA.SetData(1, summary);
@@ -251,6 +278,88 @@ namespace SoilThermophysics
             }
 
             return new AirTemperatureConfig { Mode = AirTemperatureMode.FromEPW };
+        }
+
+        /// <summary>
+        /// Parse relative humidity input from Grasshopper tree or list.
+        /// Automatically determines mode based on data structure.
+        /// Same multi-mode logic as ParseAirTemperatureInput.
+        /// </summary>
+        private RelativeHumidityConfig ParseRelativeHumidityInput(IGH_DataAccess DA, int paramIndex)
+        {
+            GH_Structure<GH_Number> tree;
+            if (!DA.GetDataTree(paramIndex, out tree) || tree == null || tree.IsEmpty)
+            {
+                return new RelativeHumidityConfig { Mode = RelativeHumidityMode.FromEPW };
+            }
+
+            var branches = tree.Branches;
+            int totalValues = 0;
+            foreach (var branch in branches)
+            {
+                if (branch != null)
+                    totalValues += branch.Count;
+            }
+
+            // Case 1: Single value (flat tree with 1 value)
+            if (totalValues == 1)
+            {
+                return new RelativeHumidityConfig
+                {
+                    Mode = RelativeHumidityMode.SingleValue,
+                    SingleRelativeHumidity = tree.get_FirstItem(true).Value
+                };
+            }
+
+            // Case 2: TimeSeries - single branch with ~8760 values (all points share).
+            // Threshold 8000 avoids overlap with PerPointConstant (typical spatial point count).
+            if (branches.Count == 1 && branches[0] != null && branches[0].Count >= 8000)
+            {
+                var series = new List<double>();
+                foreach (var val in branches[0])
+                    series.Add(val.Value);
+                return new RelativeHumidityConfig
+                {
+                    Mode = RelativeHumidityMode.TimeSeries,
+                    TimeSeriesRelativeHumidity = series
+                };
+            }
+
+            // Case 3: PerPointConstant - single branch with values (count = nPts, typically 2..7999).
+            if (branches.Count == 1 && branches[0] != null)
+            {
+                var perPoint = new List<double>();
+                foreach (var val in branches[0])
+                    perPoint.Add(val.Value);
+                return new RelativeHumidityConfig
+                {
+                    Mode = RelativeHumidityMode.PerPointConstant,
+                    PerPointRelativeHumidity = perPoint
+                };
+            }
+
+            // Case 4: PerPointTimeSeries - multiple branches, each with time series
+            if (branches.Count > 1)
+            {
+                var perPointSeries = new List<List<double>>();
+                foreach (var branch in branches)
+                {
+                    var series = new List<double>();
+                    if (branch != null)
+                    {
+                        foreach (var val in branch)
+                            series.Add(val.Value);
+                    }
+                    perPointSeries.Add(series);
+                }
+                return new RelativeHumidityConfig
+                {
+                    Mode = RelativeHumidityMode.PerPointTimeSeries,
+                    PerPointTimeSeriesRelativeHumidity = perPointSeries
+                };
+            }
+
+            return new RelativeHumidityConfig { Mode = RelativeHumidityMode.FromEPW };
         }
 
         public override GH_Exposure Exposure => GH_Exposure.secondary;

@@ -271,7 +271,7 @@ namespace Common.Core
         /// I_diffuse = DHI * (1 + cos β) / 2
         /// where β is the surface tilt angle.
         /// 
-        /// Reference: Liu & Jordan (1963), Solar Energy, 7(2), 53-59.
+        /// Reference: Liu & Jordan (1963), Solar Energy, 7(2), 53-74.
         /// </summary>
         /// <param name="dhi">Diffuse horizontal irradiance [W/m²]</param>
         /// <param name="tiltRad">Surface tilt angle [radians]</param>

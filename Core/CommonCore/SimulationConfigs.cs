@@ -122,6 +122,14 @@ namespace Common.Core
         /// </summary>
         public AirTemperatureConfig AirTemperatureConfig { get; set; }
 
+        /// <summary>
+        /// Relative humidity configuration for overriding EPW relative humidity.
+        /// If null or Mode=FromEPW, EPW relative humidity is used automatically.
+        /// When air temperature is overridden, overriding RH ensures physical consistency
+        /// between temperature, humidity, and VPD in latent heat calculations.
+        /// </summary>
+        public RelativeHumidityConfig RelativeHumidityConfig { get; set; }
+
         public object Clone()
         {
             return new SoilThermalConfig
@@ -145,7 +153,8 @@ namespace Common.Core
                 EnergyBalanceTolerance = this.EnergyBalanceTolerance,
                 MaxIterations = this.MaxIterations,
                 // FieldCapacity and WiltingPoint removed - use SoilMoistureConfig
-                AirTemperatureConfig = this.AirTemperatureConfig?.Clone() as AirTemperatureConfig
+                AirTemperatureConfig = this.AirTemperatureConfig?.Clone() as AirTemperatureConfig,
+                RelativeHumidityConfig = this.RelativeHumidityConfig?.Clone() as RelativeHumidityConfig
             };
         }
 
@@ -509,6 +518,114 @@ namespace Common.Core
 
 
     #region Ground Surface and Wind Speed Configs
+
+    /// <summary>
+    /// Relative humidity input mode for flexible RH configuration in soil thermal simulation.
+    /// Supports overriding EPW relative humidity with user-provided values to maintain
+    /// physical consistency with overridden air temperature.
+    /// </summary>
+    public enum RelativeHumidityMode
+    {
+        /// <summary>Use EPW relative humidity (default behavior).</summary>
+        FromEPW,
+        /// <summary>Single constant value for all points and all hours.</summary>
+        SingleValue,
+        /// <summary>Per-point constant: one value per point, applied to all hours.</summary>
+        PerPointConstant,
+        /// <summary>Time series: one value per hour, shared by all points.</summary>
+        TimeSeries,
+        /// <summary>Per-point time series: each point has its own hourly time series.</summary>
+        PerPointTimeSeries
+    }
+
+    /// <summary>
+    /// Relative humidity configuration for soil thermal simulation.
+    /// Supports flexible RH input: EPW, single value, per-point constant, time series, or full 2D array.
+    /// When air temperature is overridden, RH should also be overridden to maintain physical consistency
+    /// between temperature, humidity, and vapor pressure deficit (VPD).
+    /// </summary>
+    [Serializable]
+    public class RelativeHumidityConfig : ICloneable
+    {
+        /// <summary>Relative humidity input mode.</summary>
+        public RelativeHumidityMode Mode { get; set; } = RelativeHumidityMode.FromEPW;
+
+        /// <summary>Single constant relative humidity [%] for SingleValue mode.</summary>
+        public double SingleRelativeHumidity { get; set; } = 50.0;
+
+        /// <summary>Per-point constant relative humidity [%] for PerPointConstant mode. Length = nPts.</summary>
+        public List<double> PerPointRelativeHumidity { get; set; } = new List<double>();
+
+        /// <summary>Shared hourly relative humidity time series [%] for TimeSeries mode. Length = nHours.</summary>
+        public List<double> TimeSeriesRelativeHumidity { get; set; } = new List<double>();
+
+        /// <summary>Per-point hourly relative humidity [%] for PerPointTimeSeries mode. [nPts][nHours].</summary>
+        public List<List<double>> PerPointTimeSeriesRelativeHumidity { get; set; } = new List<List<double>>();
+
+        /// <summary>
+        /// Get relative humidity for a specific point and hour.
+        /// Falls back to EPW value if mode is FromEPW or data is missing.
+        /// Returns value clamped to [0, 100] to ensure physical validity.
+        /// </summary>
+        public double GetRelativeHumidity(int pointIndex, int hourIndex, double epwRelativeHumidity)
+        {
+            double rh;
+            switch (Mode)
+            {
+                case RelativeHumidityMode.SingleValue:
+                    rh = SingleRelativeHumidity;
+                    break;
+
+                case RelativeHumidityMode.PerPointConstant:
+                    if (PerPointRelativeHumidity != null && pointIndex >= 0 && pointIndex < PerPointRelativeHumidity.Count)
+                        rh = PerPointRelativeHumidity[pointIndex];
+                    else
+                        rh = epwRelativeHumidity;
+                    break;
+
+                case RelativeHumidityMode.TimeSeries:
+                    if (TimeSeriesRelativeHumidity != null && hourIndex >= 0 && hourIndex < TimeSeriesRelativeHumidity.Count)
+                        rh = TimeSeriesRelativeHumidity[hourIndex];
+                    else
+                        rh = epwRelativeHumidity;
+                    break;
+
+                case RelativeHumidityMode.PerPointTimeSeries:
+                    if (PerPointTimeSeriesRelativeHumidity != null && pointIndex >= 0 && pointIndex < PerPointTimeSeriesRelativeHumidity.Count)
+                    {
+                        var ptSeries = PerPointTimeSeriesRelativeHumidity[pointIndex];
+                        if (ptSeries != null && hourIndex >= 0 && hourIndex < ptSeries.Count)
+                            rh = ptSeries[hourIndex];
+                        else
+                            rh = epwRelativeHumidity;
+                    }
+                    else
+                        rh = epwRelativeHumidity;
+                    break;
+
+                case RelativeHumidityMode.FromEPW:
+                default:
+                    rh = epwRelativeHumidity;
+                    break;
+            }
+            // Clamp to physically valid range [0, 100]
+            return Math.Max(0.0, Math.Min(100.0, rh));
+        }
+
+        public object Clone()
+        {
+            return new RelativeHumidityConfig
+            {
+                Mode = this.Mode,
+                SingleRelativeHumidity = this.SingleRelativeHumidity,
+                PerPointRelativeHumidity = this.PerPointRelativeHumidity != null ? new List<double>(this.PerPointRelativeHumidity) : null,
+                TimeSeriesRelativeHumidity = this.TimeSeriesRelativeHumidity != null ? new List<double>(this.TimeSeriesRelativeHumidity) : null,
+                PerPointTimeSeriesRelativeHumidity = this.PerPointTimeSeriesRelativeHumidity != null
+                    ? this.PerPointTimeSeriesRelativeHumidity.Select(s => s != null ? new List<double>(s) : null).ToList()
+                    : null
+            };
+        }
+    }
 
     /// <summary>
     /// Air temperature input mode for flexible air temperature configuration in soil thermal simulation.

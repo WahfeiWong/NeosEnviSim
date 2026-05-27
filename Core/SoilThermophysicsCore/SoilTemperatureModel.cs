@@ -13,10 +13,13 @@ namespace SoilThermophysics.Core
     /// Backward compatible: LatentHeatMethod=Simplified preserves original behavior.
     /// 
     /// References:
-    /// [1] Deardorff, J.W. (1978). Efficient prediction of ground surface temperature...
-    /// [2] Noilhan, J. &amp; Planton, S. (1989). ISBA parameterization. Mon. Wea. Rev., 117, 536-549.
-    /// [3] Allen, R.G. et al. (1998). FAO Irrigation and Drainage Paper 56.
-    /// [5] Louis, J.F. (1979). A parametric model of vertical eddy fluxes. Bound.-Layer Meteor., 17, 187-202.
+    /// [1] Deardorff, J.W. (1978). Efficient prediction of ground surface temperature and moisture, with inclusion of a layer of vegetation. J. Geophys. Res., 83(C4), 1889-1903.
+    /// [2] Noilhan, J. & Planton, S. (1989). A simple parameterization of land surface processes for meteorological models. Mon. Wea. Rev., 117, 536-549.
+    /// [3] Allen, R.G., Pereira, L.S., Raes, D. & Smith, M. (1998). Crop Evapotranspiration: Guidelines for Computing Crop Water Requirements. FAO Irrigation and Drainage Paper 56, Rome, Italy.
+    /// [4] Louis, J.F. (1979). A parametric model of vertical eddy fluxes in the atmosphere. Bound.-Layer Meteor., 17, 187-202.
+    /// [5] Kondo, J. & Saigusa, N. (1994). Modelling the evaporation from bare soil with a formula for vaporization in the soil pores. J. Meteorol. Soc. Jpn., 72(3), 413-420.
+    /// [7] Tetens, O. (1930). Uber einige meteorologische Begriffe. Z. Geophys., 6, 297-309.
+
     /// </summary>
     public class SoilTemperatureModel
     {
@@ -71,20 +74,27 @@ namespace SoilThermophysics.Core
         /// </summary>
         public void Step(HourlyRecord weather, double timeStepHours = 1.0,
                          double ghiOverride = -1, double lDownOverride = -1,
-                         double windSpeedOverride = -1, double airTempOverride = -999)
+                         double windSpeedOverride = -1, double airTempOverride = -999,
+                         double rhOverride = -1)
         {
-            // Apply air temperature override if valid (above absolute zero)
+            // Apply air temperature and/or RH override if valid
             HourlyRecord effectiveWeather = weather;
-            if (airTempOverride > -273.15)
+            bool hasAirTempOverride = airTempOverride > -273.15;
+            bool hasRhOverride = rhOverride >= 0 && rhOverride <= 100;
+            if (hasAirTempOverride || hasRhOverride)
             {
                 effectiveWeather = new HourlyRecord
                 {
-                    LineIndex = weather.LineIndex, Year = weather.Year, Month = weather.Month,
-                    Day = weather.Day, Hour = weather.Hour, Minute = weather.Minute,
+                    LineIndex = weather.LineIndex,
+                    Year = weather.Year,
+                    Month = weather.Month,
+                    Day = weather.Day,
+                    Hour = weather.Hour,
+                    Minute = weather.Minute,
                     DataSource = weather.DataSource,
-                    DryBulbTemperature = airTempOverride,
+                    DryBulbTemperature = hasAirTempOverride ? airTempOverride : weather.DryBulbTemperature,
                     DewPointTemperature = weather.DewPointTemperature,
-                    RelativeHumidity = weather.RelativeHumidity,
+                    RelativeHumidity = hasRhOverride ? rhOverride : weather.RelativeHumidity,
                     AtmosphericPressure = weather.AtmosphericPressure,
                     ExtraterrestrialHorizontalRadiation = weather.ExtraterrestrialHorizontalRadiation,
                     ExtraterrestrialDirectNormalRadiation = weather.ExtraterrestrialDirectNormalRadiation,
@@ -96,14 +106,18 @@ namespace SoilThermophysics.Core
                     DirectNormalIlluminance = weather.DirectNormalIlluminance,
                     DiffuseHorizontalIlluminance = weather.DiffuseHorizontalIlluminance,
                     ZenithLuminance = weather.ZenithLuminance,
-                    WindDirection = weather.WindDirection, WindSpeed = weather.WindSpeed,
-                    TotalSkyCover = weather.TotalSkyCover, OpaqueSkyCover = weather.OpaqueSkyCover,
-                    Visibility = weather.Visibility, CeilingHeight = weather.CeilingHeight,
+                    WindDirection = weather.WindDirection,
+                    WindSpeed = weather.WindSpeed,
+                    TotalSkyCover = weather.TotalSkyCover,
+                    OpaqueSkyCover = weather.OpaqueSkyCover,
+                    Visibility = weather.Visibility,
+                    CeilingHeight = weather.CeilingHeight,
                     PresentWeatherObservation = weather.PresentWeatherObservation,
                     PresentWeatherCodes = weather.PresentWeatherCodes,
                     PrecipitableWater = weather.PrecipitableWater,
                     AerosolOpticalDepth = weather.AerosolOpticalDepth,
-                    SnowDepth = weather.SnowDepth, DaysSinceLastSnowfall = weather.DaysSinceLastSnowfall,
+                    SnowDepth = weather.SnowDepth,
+                    DaysSinceLastSnowfall = weather.DaysSinceLastSnowfall,
                     Albedo = weather.Albedo,
                     LiquidPrecipitationDepth = weather.LiquidPrecipitationDepth,
                     LiquidPrecipitationQuantity = weather.LiquidPrecipitationQuantity
@@ -448,9 +462,8 @@ namespace SoilThermophysics.Core
         }
 
         /// <summary>
-        /// Kondo & Saigusa (1994) soil-texture-dependent beta parameterization.
+        /// Reference: Kondo, J. & Saigusa, N. (1994). Modelling the evaporation from bare soil with a formula for vaporization in the soil pores. J. Meteorol. Soc. Jpn., 72(3), 413-420.
         /// Based on soil texture index (1=sand ... 5=clay) and moisture ratio.
-        /// Reference: Kondo, J. & Saigusa, N. (1994). J. Appl. Meteor., 33, 728-743.
         /// </summary>
         private double ComputeBetaKondoSaigusa(double wg, double wsat)
         {
@@ -495,9 +508,10 @@ namespace SoilThermophysics.Core
         }
 
         /// <summary>Reference ET [mm/h] using FAO56 Penman-Monteith for grass surface.</summary>
-        public double CalculateReferenceET(HourlyRecord weather, double rNet, double gFlux, double windSpeedOverride = -1, double airTempOverride = -999)
+        public double CalculateReferenceET(HourlyRecord weather, double rNet, double gFlux, double windSpeedOverride = -1, double airTempOverride = -999, double rhOverride = -1)
         {
             double tAir = airTempOverride > -273.15 ? airTempOverride : weather.DryBulbTemperature;
+            double rh = (rhOverride >= 0 && rhOverride <= 100) ? rhOverride : weather.RelativeHumidity;
             double pa_kPa = weather.AtmosphericPressure / 1000.0;
             if (pa_kPa < 10) pa_kPa = 101.325;
             double psych = 0.665e-3 * pa_kPa;
@@ -505,7 +519,7 @@ namespace SoilThermophysics.Core
             double rhoAir = pa_kPa * 1000.0 / (287.05 * (tAir + 273.15));
             double delta = SlopeSaturationVaporPressure(tAir);
             double es = SaturationVaporPressure(tAir);
-            double ea = es * Math.Max(0, Math.Min(1.0, weather.RelativeHumidity / 100.0));
+            double ea = es * Math.Max(0, Math.Min(1.0, rh / 100.0));
             double vpd = Math.Max(0, es - ea);
             double rhoCp = rhoAir * 1004.0;
 

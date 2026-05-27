@@ -9,8 +9,7 @@ namespace Common.Core
     /// Valid for years -2000 to 6000 with uncertainty of +/- 0.0003 degrees.
     /// 
     /// References:
-    /// [1] Reda, I., Andreas, A. (2008). Solar Position Algorithm for Solar Radiation Applications. 
-    ///     Solar Energy, 76(5), 577-589. NREL Report No. TP-560-34302.
+    /// [1] Reda, I. & Andreas, A. (2004). Solar Position Algorithm for Solar Radiation Applications. Solar Energy, 76(5), 577-589. https://doi.org/10.1016/j.solener.2003.12.003
     /// </summary>
     public static class SPACalculator
     {

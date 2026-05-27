@@ -47,13 +47,13 @@ namespace NeosStatistic
             // 检查数据有效性
             if (data.Count == 0)
             {
-                AddRuntimeMessage(GH_RuntimeMessageLevel.Error, "输入数据不能为空");
+                AddRuntimeMessage(GH_RuntimeMessageLevel.Error, "Input values could not be null");
                 return;
             }
 
             if (isSample && data.Count < 2)
             {
-                AddRuntimeMessage(GH_RuntimeMessageLevel.Error, "样本统计需要至少2个数据点");
+                AddRuntimeMessage(GH_RuntimeMessageLevel.Error, "Sample statistics require at least 2 data points");
                 return;
             }
 
