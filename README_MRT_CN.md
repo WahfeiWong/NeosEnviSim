@@ -35,7 +35,7 @@ $$\Delta T_{\text{sw}} = \frac{I_{\text{body}} \cdot (\alpha / \varepsilon)}{f \
 
 **三方向长波辐射分解：**
 
-$$\Delta T_{\text{lw}} = c_{\text{lw}} \cdot \big[ F_{\text{SVF}} \cdot (T_{\text{sky}} - T_{\text{ref}}) + F_{\text{GVF}} \cdot (T_g - T_{\text{ref}}) + F_{\text{OVF}} \cdot (T_{\text{obs}} - T_{\text{ref}}) \big]$$
+$$\Delta T_{\text{lw}} = c_{\text{lw}} \cdot \left[ F_{\text{SVF}} \cdot (T_{\text{sky}} - T_{\text{ref}}) + F_{\text{GVF}} \cdot (T_g - T_{\text{ref}}) + F_{\text{OVF}} \cdot (T_{\text{obs}} - T_{\text{ref}}) \right]$$
 
 其中：
 - $c_{\text{lw}}$：长波线性化系数（默认 0.5）
@@ -81,7 +81,7 @@ $$T_{\text{MRT}} = \bigl( \text{mrtK}_4 \bigr)^{0.25} - 273.15$$
 
 其中：
 
-$$\text{mrtK}_4 = \frac{1}{\sigma} \Big\{ \big[ L_{\text{sky}} + \tfrac{\alpha}{\varepsilon} I_{\text{DH}} \big] F_{\text{SVF}} + \big[ L_g + \tfrac{\alpha}{\varepsilon} \rho_g I_{\text{GH}} \big] F_{\text{GVF}} + L_{\text{obs}} F_{\text{OVF}} \Big\} + \frac{\alpha \cdot I_{\text{direct}}}{\varepsilon \cdot \sigma}$$
+$$\text{mrtK}_4 = \frac{1}{\sigma} \left\{ \left[ L_{\text{sky}} + \frac{\alpha}{\varepsilon} I_{\text{DH}} \right] F_{\text{SVF}} + \left[ L_g + \frac{\alpha}{\varepsilon} \rho_g I_{\text{GH}} \right] F_{\text{GVF}} + L_{\text{obs}} F_{\text{OVF}} \right\} + \frac{\alpha \cdot I_{\text{direct}}}{\varepsilon \cdot \sigma}$$
 
 各方向长波辐射：
 
