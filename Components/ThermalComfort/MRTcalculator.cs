@@ -111,9 +111,6 @@ namespace ThermalComfort
                 if (timeWrapper?.Value is SimulationTimeConfig tc) timeConfig = tc;
             }
 
-            // =====================================================================
-            // NEW (index 5): Air Temperature (Ta) - tree access for spatially/temporally varying data
-            // =====================================================================
             GH_Structure<GH_Number> airTempTree = new GH_Structure<GH_Number>();
             DA.GetDataTree(5, out airTempTree);
             List<double> airTemperatures = new List<double>();

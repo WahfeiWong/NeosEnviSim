@@ -11,7 +11,7 @@ using System.Linq;
 namespace SoilThermophysics
 {
     /// <summary>
-    /// Soil Thermal Simulator - Core simulation component (RadSim architecture).
+    /// Soil Thermal Simulator - Core simulation component.
     /// 
     /// Performs hour-by-hour soil temperature and latent heat flux calculation
     /// using Force-Restore + Penman-Monteith (single-source).
@@ -70,7 +70,7 @@ namespace SoilThermophysics
 
             pManager.AddBooleanParameter("Run", "Run",
                 "Set to true to execute the simulation.", GH_ParamAccess.item, false);
-            
+
         }
 
         protected override void RegisterOutputParams(GH_OutputParamManager pManager)
@@ -130,6 +130,22 @@ namespace SoilThermophysics
                 else
                 {
                     logs.Add("Air temperature: using EPW (auto)");
+                }
+                if (soilConfig.RelativeHumidityConfig != null && soilConfig.RelativeHumidityConfig.Mode != RelativeHumidityMode.FromEPW)
+                {
+                    var rhc = soilConfig.RelativeHumidityConfig;
+                    string rhDesc = rhc.Mode == RelativeHumidityMode.SingleValue
+                        ? $"single={rhc.SingleRelativeHumidity:F1}%"
+                        : rhc.Mode == RelativeHumidityMode.PerPointConstant
+                        ? $"per-pt-const ({rhc.PerPointRelativeHumidity.Count}pts)"
+                        : rhc.Mode == RelativeHumidityMode.TimeSeries
+                        ? $"time-series ({rhc.TimeSeriesRelativeHumidity.Count}hrs)"
+                        : $"per-pt-series ({rhc.PerPointTimeSeriesRelativeHumidity.Count}pts)";
+                    logs.Add($"Relative humidity override: {rhDesc}");
+                }
+                else
+                {
+                    logs.Add("Relative humidity: using EPW (auto)");
                 }
 
                 // ---- Load EPW ----
@@ -231,7 +247,12 @@ namespace SoilThermophysics
                         && soilConfig.AirTemperatureConfig.Mode != AirTemperatureMode.FromEPW)
                         ? soilConfig.AirTemperatureConfig.GetAirTemperature(0, hoy, rec.DryBulbTemperature)
                         : -999;
-                    model.Step(rec, timeStepHours, -1, -1, windOverride, airTempOverride);
+                    // Get relative humidity override from SoilThermalConfig (if configured)
+                    double rhOverride = (soilConfig.RelativeHumidityConfig != null
+                        && soilConfig.RelativeHumidityConfig.Mode != RelativeHumidityMode.FromEPW)
+                        ? soilConfig.RelativeHumidityConfig.GetRelativeHumidity(0, hoy, rec.RelativeHumidity)
+                        : -1;
+                    model.Step(rec, timeStepHours, -1, -1, windOverride, airTempOverride, rhOverride);
 
                     tgList.Add(model.T1);
                     t2List.Add(model.T2);
@@ -250,7 +271,7 @@ namespace SoilThermophysics
                     etList.Add(et_mmh);
 
                     // Reference ET (FAO56 grass)
-                    double etRef = model.CalculateReferenceET(rec, model.LastNetRadiation, model.LastGroundHeatFlux, windOverride, airTempOverride);
+                    double etRef = model.CalculateReferenceET(rec, model.LastNetRadiation, model.LastGroundHeatFlux, windOverride, airTempOverride, rhOverride);
                     etRefList.Add(etRef);
 
                     if (hoy > 0 && hoy % 1000 == 0)
@@ -325,3 +346,4 @@ namespace SoilThermophysics
         public override Guid ComponentGuid => new Guid("C5A9CF7E-89FC-4960-8B0E-170F43F50455");
     }
 }
+

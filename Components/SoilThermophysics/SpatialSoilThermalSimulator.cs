@@ -324,6 +324,22 @@ namespace SoilThermophysics
                 {
                     logs.Add("Air temperature: using EPW (auto)");
                 }
+                if (soilConfig.RelativeHumidityConfig != null && soilConfig.RelativeHumidityConfig.Mode != RelativeHumidityMode.FromEPW)
+                {
+                    var rhc = soilConfig.RelativeHumidityConfig;
+                    string rhDesc = rhc.Mode == RelativeHumidityMode.SingleValue
+                        ? $"single={rhc.SingleRelativeHumidity:F1}%"
+                        : rhc.Mode == RelativeHumidityMode.PerPointConstant
+                        ? $"per-pt-const ({rhc.PerPointRelativeHumidity.Count}pts)"
+                        : rhc.Mode == RelativeHumidityMode.TimeSeries
+                        ? $"time-series ({rhc.TimeSeriesRelativeHumidity.Count}hrs)"
+                        : $"per-pt-series ({rhc.PerPointTimeSeriesRelativeHumidity.Count}pts)";
+                    logs.Add($"Relative humidity override: {rhDesc}");
+                }
+                else
+                {
+                    logs.Add("Relative humidity: using EPW (auto)");
+                }
 
                 // =====================================================================
                 // Phase 1: SVF (ground-level sky view factor)
@@ -516,8 +532,13 @@ namespace SoilThermophysics
                             ? windConfig.GetWindSpeed(pIdx, hoy, epwWind)
                             : -1;
 
-                        // Run model with wind speed and air temperature overrides
-                        models[pIdx].Step(record, timeStepHours, ghiActual, lDownActual, windOverride, airTempOverride);
+                        // Get relative humidity override from SoilThermalConfig (if configured)
+                        double rhOverride = (soilConfig.RelativeHumidityConfig != null
+                            && soilConfig.RelativeHumidityConfig.Mode != RelativeHumidityMode.FromEPW)
+                            ? soilConfig.RelativeHumidityConfig.GetRelativeHumidity(pIdx, hoy, record.RelativeHumidity)
+                            : -1;
+                        // Run model with wind speed, air temperature, and RH overrides
+                        models[pIdx].Step(record, timeStepHours, ghiActual, lDownActual, windOverride, airTempOverride, rhOverride);
 
                         // Store results (only for output range, skip pre-heat)
                         if (hoy >= outStartHoy)
@@ -537,7 +558,7 @@ namespace SoilThermophysics
                             allET[pIdx].Add(et_mmh);
 
                             double etRef = models[pIdx].CalculateReferenceET(record,
-                                models[pIdx].LastNetRadiation, models[pIdx].LastGroundHeatFlux, windOverride, airTempOverride);
+                                models[pIdx].LastNetRadiation, models[pIdx].LastGroundHeatFlux, windOverride, airTempOverride, rhOverride);
                             allETref[pIdx].Add(etRef);
                         }
                     });

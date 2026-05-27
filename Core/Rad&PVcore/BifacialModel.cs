@@ -29,10 +29,7 @@ namespace SolarPV.Core
     /// References:
     /// [1] Marion, B., et al. (2017). A Practical Irradiance Model for Bifacial PV Modules.
     ///     NREL/TP-6A20-67847. https://www.nrel.gov/docs/fy17osti/67847.pdf
-    /// [2] Guo, S., et al. (2013). Bifacial PV module ray tracing model for energy rating.
-    ///     Proc. 28th EUPVSEC, 3173-3177.
-    /// [3] Deline, C., et al. (2016). Bifacial Gain and Reflection Loss with Rear Irradiance.
-    ///     Proc. 43rd IEEE PVSC.
+    /// [2] Hansen, C.W., et al. (2016). "Analysis of irradiance models for bifacial PV modules." Proc. 2016 IEEE 43rd PVSC, pp. 138-143.
     /// </summary>
     public static class BifacialModel
     {
