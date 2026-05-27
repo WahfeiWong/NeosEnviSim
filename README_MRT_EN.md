@@ -77,11 +77,11 @@ Based on the RayMan model by Matzarakis et al., employing a complete radiation b
 
 Longwave radiation in quartic form:
 
-$$T_{\text{MRT}} = \bigl( \text{mrtK}_4 \bigr)^{0.25} - 273.15$$
+$$T_{\text{MRT}} = (\text{mrtK}_4)^{0.25} - 273.15$$
 
 Where:
 
-$$\text{mrtK}_4 = \frac{1}{\sigma} \left\{ \left[ L_{\text{sky}} + \frac{\alpha}{\varepsilon} I_{\text{DH}} \right] F_{\text{SVF}} + \left[ L_g + \frac{\alpha}{\varepsilon} \rho_g I_{\text{GH}} \right] F_{\text{GVF}} + L_{\text{obs}} F_{\text{OVF}} \right\} + \frac{\alpha \cdot I_{\text{direct}}}{\varepsilon \cdot \sigma}$$
+$$\text{mrtK}_4 = \frac{1}{\sigma} \left( \left[ L_{\text{sky}} + \frac{\alpha}{\varepsilon} I_{\text{DH}} \right] F_{\text{SVF}} + \left[ L_g + \frac{\alpha}{\varepsilon} \rho_g I_{\text{GH}} \right] F_{\text{GVF}} + L_{\text{obs}} F_{\text{OVF}} \right) + \frac{\alpha \cdot I_{\text{direct}}}{\varepsilon \cdot \sigma}$$
 
 Longwave radiation in each direction:
 

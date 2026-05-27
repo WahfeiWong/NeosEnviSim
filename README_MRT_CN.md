@@ -77,11 +77,11 @@ $$\varepsilon_{\text{sky}} = 0.711 + 0.56 \cdot T_d + 0.73 \cdot T_d^2$$
 
 长波辐射的四次方形式：
 
-$$T_{\text{MRT}} = \bigl( \text{mrtK}_4 \bigr)^{0.25} - 273.15$$
+$$T_{\text{MRT}} = (\text{mrtK}_4)^{0.25} - 273.15$$
 
 其中：
 
-$$\text{mrtK}_4 = \frac{1}{\sigma} \left\{ \left[ L_{\text{sky}} + \frac{\alpha}{\varepsilon} I_{\text{DH}} \right] F_{\text{SVF}} + \left[ L_g + \frac{\alpha}{\varepsilon} \rho_g I_{\text{GH}} \right] F_{\text{GVF}} + L_{\text{obs}} F_{\text{OVF}} \right\} + \frac{\alpha \cdot I_{\text{direct}}}{\varepsilon \cdot \sigma}$$
+$$\text{mrtK}_4 = \frac{1}{\sigma} \left( \left[ L_{\text{sky}} + \frac{\alpha}{\varepsilon} I_{\text{DH}} \right] F_{\text{SVF}} + \left[ L_g + \frac{\alpha}{\varepsilon} \rho_g I_{\text{GH}} \right] F_{\text{GVF}} + L_{\text{obs}} F_{\text{OVF}} \right) + \frac{\alpha \cdot I_{\text{direct}}}{\varepsilon \cdot \sigma}$$
 
 各方向长波辐射：
 
