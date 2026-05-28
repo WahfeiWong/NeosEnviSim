@@ -532,3 +532,5 @@ $$T_1^{init} = T_{air}^{first} \; \text{或} \; T_{user}^{surf}, \qquad T_2^{ini
 
 7. **Reda, I. & Andreas, A.** (2004). Solar Position Algorithm for Solar Radiation Applications. *Solar Energy*, 76(5), 577-589. https://doi.org/10.1016/j.solener.2003.12.003
 
+---
+
