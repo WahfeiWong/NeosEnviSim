@@ -534,4 +534,3 @@ $$T_1^{init} = T_{air}^{first} \; \text{或} \; T_{user}^{surf}, \qquad T_2^{ini
 
 ---
 
-*由 neosEnviSim 土壤热物理源代码 (v2.0) 生成。*

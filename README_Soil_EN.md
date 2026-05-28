@@ -534,4 +534,3 @@ $$T_1^{init} = T_{air}^{first} \; \text{or} \; T_{user}^{surf}, \qquad T_2^{init
 
 ---
 
-*Generated from neosEnviSim Soil Thermal Physics source code (v2.0).*
