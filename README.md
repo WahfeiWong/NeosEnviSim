@@ -22,9 +22,3 @@ It offers a wide range of functionalities, including:
 **·Street view analysis**<br>
 **·Data visualization**<br>
 **·...**<br>
----
-# **Release Branching**<br>
-**NeosEnviSim** uses a promotion cascade for releases:<br>
-`NeosEnviSim-Dev` is the active integration branch, and used to publish installer for validation.<br>
-`master` is used only for merging verified, error-free code and releasing official programs.<br>
-The intended flow is `NeosEnviSim-Dev -> master`. Avoid merging feature branches directly into `master`.
