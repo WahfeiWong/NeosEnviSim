@@ -65,9 +65,18 @@ $$\mathbf{f}_i^{drive} = \frac{m_i}{\tau_i} \left( \mathbf{v}_i^{desired} - \mat
 $$\mathbf{v}_i^{desired} = \mathbf{e}_i \cdot v_i^{des} \cdot s_i$$
 
 单位向量 $\mathbf{e}_i$ 根据运行模式确定：
-- **路径跟随模式**：$\mathbf{e}_i = \frac{\mathbf{x}_{target} - \mathbf{x}_i}{\|\mathbf{x}_{target} - \mathbf{x}_i\|}$，指向当前路径点
-- **惯性模式**：$\mathbf{e}_i = \mathbf{d}_i^{move}$，使用实际运动方向
-- **探索模式（引导点存在）**：$\mathbf{e}_i = 0.6 \mathbf{d}_i^{move} + 0.4 \frac{\mathbf{x}_{guide} - \mathbf{x}_i}{\|\mathbf{x}_{guide} - \mathbf{x}_i\|}$，结合惯性与引导方向
+
+**路径跟随模式** — 指向当前路径点：
+
+$$\mathbf{e}_i = \frac{\mathbf{x}_{target} - \mathbf{x}_i}{\|\mathbf{x}_{target} - \mathbf{x}_i\|}$$
+
+**惯性模式** — 使用实际运动方向：
+
+$$\mathbf{e}_i = \mathbf{d}_i^{move}$$
+
+**探索模式（引导点存在）** — 结合惯性与引导方向：
+
+$$\mathbf{e}_i = 0.6 \, \mathbf{d}_i^{move} + 0.4 \, \frac{\mathbf{x}_{guide} - \mathbf{x}_i}{\|\mathbf{x}_{guide} - \mathbf{x}_i\|}$$
 
 | 参数 | 符号 | 单位 | 说明 | 默认值 | 范围 |
 |-----------|--------|------|-------------|---------|-------|
@@ -534,9 +543,19 @@ $$t_{evac} = n_{step} \cdot \Delta t$$
 
 ### 11.3 状态初始化
 
-- 代理初始速度：$\mathbf{v}(0) = \mathbf{0}$
-- 初始运动方向：$\mathbf{d}^{move}(0) = \mathbf{0}$
-- 生成计时器：$t_{spawn} = \mathrm{rand}(0, \Delta t_{spawn})$（均匀随机初始化）
+代理初始速度：
+
+$$\mathbf{v}(0) = \mathbf{0}$$
+
+初始运动方向：
+
+$$\mathbf{d}^{move}(0) = \mathbf{0}$$
+
+生成计时器：
+
+$$t_{spawn} = \mathrm{rand}(0, \Delta t_{spawn})$$
+
+均匀随机初始化。
 
 ---
 
