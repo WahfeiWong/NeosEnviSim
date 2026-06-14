@@ -195,8 +195,10 @@ namespace SoilThermophysics
                 double topLayerDepth = groundConfig.TopLayerDepth;
                 double deepLayerDepth = groundConfig.DeepLayerDepth;
 
-                // Obstacles: read from GroundSet (converted from Breps in GroundSurfaceSettings)
-                var obstacleMeshes = groundConfig.ObstacleMeshes ?? new List<Mesh>();
+                // ENHANCED (2026-06-14): Use ObstacleSet for classified obstacle handling.
+                // Flatten all meshes for SVF calculations that don't need classification.
+                var obstacleSet = groundConfig.ObstacleSet;
+                List<Mesh> allObstacleMeshes = obstacleSet?.GetAllMeshes() ?? new List<Mesh>();
 
                 // ---- 2: Soil Thermal config ----
                 var soilConfig = ExtractConfig<SoilThermalConfig>(DA, 2);
@@ -282,8 +284,15 @@ namespace SoilThermophysics
                 double timeStepHours = epwData.TimeStepHours;
                 int outHours = outEndHoy - outStartHoy + 1;
 
+                string obsLog = obstacleSet != null && obstacleSet.HasAnyObstacles
+                    ? $"ObsSet: Opaque={obstacleSet.OpaqueObjectMeshes?.Count ?? 0}, " +
+                      $"TreeDet={obstacleSet.TreeDetailMeshes?.Count ?? 0}, " +
+                      $"Canopy={obstacleSet.TreeCanopyMeshes?.Count ?? 0}, " +
+                      $"TransShd={obstacleSet.TranslucentShadeMeshes?.Count ?? 0}"
+                    : $"Obstacles: {allObstacleMeshes.Count} (legacy)";
+
                 logs.Add($"=== Spatial Soil Thermal Simulator ===");
-                logs.Add($"Points: {nPts}, Obstacles: {obstacleMeshes.Count}");
+                logs.Add($"Points: {nPts}, {obsLog}");
                 logs.Add($"d1={topLayerDepth:F3}m d2={deepLayerDepth:F3}m HExp={exposureHeight:F3}m");
                 logs.Add($"RhoSur={surroundReflectance:F2} EpsSur={surroundEmissivity:F2} SVFN={svfSampleCount}");
                 if (isPartial)
@@ -345,12 +354,12 @@ namespace SoilThermophysics
                 // Phase 1: SVF (ground-level sky view factor)
                 // =====================================================================
                 var svf = new double[nPts];
-                if (obstacleMeshes.Count > 0)
+                if (allObstacleMeshes.Count > 0)
                 {
                     Parallel.For(0, nPts, i =>
                     {
                         svf[i] = HumanExposureModel.CalculateSkyViewFactorForPoint(
-                            analysisPoints[i], obstacleMeshes, exposureHeight, svfSampleCount);
+                            analysisPoints[i], allObstacleMeshes, exposureHeight, svfSampleCount);
                     });
                     logs.Add($"SVF range: [{svf.Min():F3}, {svf.Max():F3}] (avg={svf.Average():F3})");
                 }
@@ -403,12 +412,14 @@ namespace SoilThermophysics
                 logs.Add("Solar position pre-computation complete.");
 
                 // =====================================================================
-                // Phase 3: Ground-level solar exposure factor calculation
-                // Uses human exposure core methodology with:
-                //   bodyHeight = 0 (ground level)
-                //   sampleCount = 1 (single ray per point)
+                // Phase 3: Ground-level DNI exposure factor calculation (ENHANCED 2026-06-14)
+                // Uses classified ObstacleSet with fine-grained DNI transmission:
+                //   - Opaque: DNI = 0 (full block)
+                //   - Tree: DNI * exp(-k * LAD * s) (Beer-Lambert canopy transmission)
+                //   - Translucent: DNI * tau (fixed transmittance)
+                // Ground level: bodyHeight = 0, sampleCount = 1 (single ray per point)
                 // =====================================================================
-                var exposureFactors = new double[nPts, nHoursTotal];
+                var dniExposureFactors = new double[nPts, nHoursTotal];
                 int expComputeStart = isPartial ? simStartHoy : 0;
                 int expComputeEnd = isPartial ? simEndHoy : nHoursTotal - 1;
 
@@ -422,28 +433,39 @@ namespace SoilThermophysics
                     if (sunVec == Vector3d.Unset)
                     {
                         for (int p = 0; p < nPts; p++)
-                            exposureFactors[p, hoy] = 0.0;
+                            dniExposureFactors[p, hoy] = 0.0;
                         continue;
                     }
 
-                    if (obstacleMeshes.Count > 0)
+                    if (obstacleSet != null && obstacleSet.HasAnyObstacles)
                     {
+                        // ENHANCED: Use ObstacleSet with Beer-Lambert transmission
+                        double[] batch = HumanExposureModel.CalculateDNIExposureFactorsBatch(
+                            analysisPoints, sunVec, obstacleSet,
+                            groundLevelBodyHeight, groundLevelSamplePoints, maxRayDistance);
+
+                        for (int p = 0; p < nPts; p++)
+                            dniExposureFactors[p, hoy] = batch[p];
+                    }
+                    else if (allObstacleMeshes.Count > 0)
+                    {
+                        // Legacy fallback: no ObstacleSet, treat all as opaque
                         double[] batch = HumanExposureModel.CalculateExposureFactorsBatch(
-                            analysisPoints, sunVec, obstacleMeshes,
+                            analysisPoints, sunVec, allObstacleMeshes,
                             groundLevelBodyHeight, exposureHeight,
                             groundLevelSamplePoints, maxRayDistance);
 
                         for (int p = 0; p < nPts; p++)
-                            exposureFactors[p, hoy] = batch[p];
+                            dniExposureFactors[p, hoy] = batch[p];
                     }
                     else
                     {
                         for (int p = 0; p < nPts; p++)
-                            exposureFactors[p, hoy] = 1.0;
+                            dniExposureFactors[p, hoy] = 1.0;
                     }
                 }
 
-                logs.Add("Ground-level solar exposure computation complete.");
+                logs.Add("Ground-level DNI exposure computation complete (with obstacle transmission).");
 
                 // =====================================================================
                 // Phase 4: Initialize models
@@ -497,11 +519,12 @@ namespace SoilThermophysics
                     Parallel.For(0, nPts, new ParallelOptions
                     { MaxDegreeOfParallelism = Math.Max(1, Environment.ProcessorCount - 1) }, pIdx =>
                     {
-                        // Per-point corrected SHORTWAVE
+                        // Per-point corrected SHORTWAVE (ENHANCED 2026-06-14)
+                        // dniExposureFactors accounts for transmission through vegetation
+                        // (Beer-Lambert) and translucent materials.
                         double diffuseActual = dhi * svf[pIdx];
-                        double directHorizontal = dni * sinAlt * exposureFactors[pIdx, hoy];
+                        double directHorizontal = dni * sinAlt * dniExposureFactors[pIdx, hoy];
                         // FIX (P0): Surround GHI assumes open horizontal ground (SVF=1, no shading).
-                        // Previous version incorrectly mixed target point's SVF and exposure.
                         // Correct formula: GHI_surround = DHI + DNI*sin(alt) for open horizontal surface
                         double ghiSurround = dhi + dni * sinAlt;
                         double reflectedActual = surroundReflectance * ghiSurround * (1.0 - svf[pIdx]);

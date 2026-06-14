@@ -397,11 +397,33 @@ The spatial simulator applies per-point radiation corrections using sky view fac
 
 ### 10.1 Corrected Shortwave (GHI)
 
-$$GHI_{actual} = DHI \cdot SVF + DNI \cdot \sin(\alpha) \cdot f_{exp} + \rho_{sur} \cdot GHI_{surround} \cdot (1 - SVF)$$
+$$GHI_{actual} = DHI \cdot SVF + DNI \cdot \sin(\alpha) \cdot f_{DNI} + \rho_{sur} \cdot GHI_{surround} \cdot (1 - SVF)$$
 
 where:
 
 $$GHI_{surround} = DHI + DNI \cdot \sin(\alpha)$$
+
+**Effective DNI Exposure Factor $f_{DNI}$ (Enhanced, 2026-06-14):**
+
+Replaces the binary exposure factor $f_{exp}$ (shaded/unshaded only) with the effective DNI exposure factor $f_{DNI}$, supporting differentiated transmission through three obstacle types:
+
+| Hit Type | DNI Contribution | Physical Meaning |
+|:---:|:---:|:---|
+| No occlusion | 1.0 | Full direct radiation |
+| Opaque object | 0.0 | Fully blocked; all Tree/Translucent behind it are in shadow |
+| Tree detail mesh | $\exp(-k \cdot \text{LAD} \cdot s)$ | Beer-Lambert canopy transmission (only when no Opaque on ray path) |
+| Translucent sunshade | $\tau$ | Fixed transmittance (only when no Opaque on ray path) |
+
+Decision logic:
+1. **Any opaque object on the ray path** → DNI = 0 (fully blocked)
+2. No opaque → find the **nearest from the sun direction** Tree/Translucent obstacle
+3. No obstacles at all → full DNI
+
+Vegetation canopy transmission equation (Beer-Lambert law):
+
+$$I_{\text{transmitted}} = I_{\text{DN}} \cdot \exp(-k \cdot \text{LAD} \cdot s)$$
+
+Where $s$ is the geometric path length through the tree canopy [m], $k$ is the extinction coefficient, $\text{LAD}$ is leaf area density [m²/m³], and $\tau$ is the sunshade direct solar transmittance.
 
 ### 10.2 Corrected Longwave
 
@@ -414,7 +436,8 @@ $$L_{sky} = HIR_{EPW} \cdot SVF$$
 | Parameter | Symbol | Unit | Default | Description |
 |-----------|--------|------|---------|-------------|
 | Sky View Factor | $SVF$ | -- | 1.0 (no obstacles) | [0, 1]; fraction of sky hemisphere visible |
-| Solar exposure factor | $f_{exp}$ | -- | -- | [0, 1]; fraction of direct sun unobstructed |
+| Effective DNI exposure factor | $f_{DNI}$ | -- | -- | [0, 1]; DNI effective factor combining exposure and transmission |
+| Solar exposure factor | $f_{exp}$ | -- | -- | [0, 1]; binary: fraction of direct sun unobstructed (legacy) |
 | Solar altitude | $\alpha$ | rad | -- | From SPA solar position |
 | Surround reflectance | $\rho_{sur}$ | -- | 0.2 | Shortwave reflectance of surrounding surfaces |
 | Surround emissivity | $\varepsilon_{sur}$ | -- | 0.95 | Longwave emissivity of surrounding surfaces |
@@ -472,7 +495,7 @@ $$L_{sky} = HIR_{EPW} \cdot SVF$$
 | Port | Name | Type | Required | Description |
 |------|------|------|----------|-------------|
 | 0 | `GSurf` | Brep | **Yes** | Ground surface geometry |
-| 1 | `Obst` | Brep | No | Context obstacles |
+| 1 | `ObsSet` | Generic | No | **Enhanced (2026-06-14)**: Classified obstacle set (ObstacleSet). Connect ObsSet component. Supports opaque buildings, tree canopy transmission (Beer-Lambert), and translucent sunshades. Backward compatible: accepts List<Brep> or List<Mesh> |
 | 2 | `Res` | Number | No | Mesh resolution [m] |
 | 3 | `d1` | Number | No | Top layer depth [m] |
 | 4 | `d2` | Number | No | Deep layer depth [m] |

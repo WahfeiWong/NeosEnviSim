@@ -58,11 +58,14 @@ namespace SoilThermophysics
                 "Input ground Brep or Surface(s). Each face will be meshed independently.",
                 GH_ParamAccess.list);
 
-            // ---- Optional: context obstacles (geometry category, contiguous with GSurf) ----
-            pManager.AddBrepParameter("Obstacles", "Obst",
-                "Context obstacles as Breps for SVF and solar exposure calculation (optional). " +
-                "Automatically converted to triangulated meshes and stored in GroundSet.",
-                GH_ParamAccess.list);
+            // ENHANCED (2026-06-14): ObstacleSet input replaces flat Brep list.
+            // Supports classified obstacles (opaque, tree, translucent) for fine-grained
+            // DNI transmission calculation via Beer-Lambert law.
+            pManager.AddGenericParameter("Obstacle Set", "ObsSet",
+                "Optional: Classified obstacle set (ObstacleSet) for SVF and solar exposure. " +
+                "Connect ObsSet component. Supports opaque buildings, trees with canopy transmission, " +
+                "and translucent sunshades.",
+                GH_ParamAccess.item);
             pManager[1].Optional = true;
 
             // ---- Mesh parameters ----
@@ -134,9 +137,24 @@ namespace SoilThermophysics
                 return;
             }
 
-            // ---- Input 1: Obstacles ----
-            var obstaclesBrep = new List<Brep>();
-            DA.GetDataList(1, obstaclesBrep);
+            // ENHANCED (2026-06-14): Extract ObstacleSet from input (replaces flat Brep list)
+            ObstacleSet obstacleSet = null;
+            GH_ObjectWrapper obsWrapper = null;
+            if (DA.GetData(1, ref obsWrapper))
+            {
+                if (obsWrapper?.Value is ObstacleSet os) obstacleSet = os;
+                else if (obsWrapper?.Value is List<Brep> brepList)
+                {
+                    // Backward compatibility: convert List<Brep> to ObstacleSet (Opaque)
+                    var opaqueMeshes = BrepMeshing.ConvertBrepsToMeshes(brepList);
+                    obstacleSet = new ObstacleSet { OpaqueObjectMeshes = opaqueMeshes };
+                }
+                else if (obsWrapper?.Value is List<Mesh> meshList)
+                {
+                    // Backward compatibility: convert List<Mesh> to ObstacleSet (Opaque)
+                    obstacleSet = new ObstacleSet { OpaqueObjectMeshes = meshList };
+                }
+            }
 
             // ---- Inputs 2-8: Parameters ----
             double resolution = 1.0;
@@ -163,8 +181,8 @@ namespace SoilThermophysics
             surroundReflectance = Math.Max(0.0, Math.Min(1.0, surroundReflectance));
             surroundEmissivity = Math.Max(0.0, Math.Min(1.0, surroundEmissivity));
 
-            // ---- Convert obstacles to meshes via Geometry.Core ----
-            List<Mesh> obstacleMeshes = BrepMeshing.ConvertBrepsToMeshes(obstaclesBrep);
+            // Ensure obstacleSet is initialized (null if no obstacles connected)
+            if (obstacleSet == null) obstacleSet = new ObstacleSet();
 
             // ---- Mesh Generation via Geometry.Core ----
             var allMeshes = new List<Mesh>();
@@ -232,14 +250,21 @@ namespace SoilThermophysics
                 SurroundReflectance = surroundReflectance,
                 SurroundEmissivity = surroundEmissivity,
                 MeshResolution = resolution,
-                ObstacleMeshes = obstacleMeshes
+                ObstacleSet = obstacleSet
             };
+
+            string obsInfo = obstacleSet.HasAnyObstacles
+                ? $"Opaque={obstacleSet.OpaqueObjectMeshes?.Count ?? 0}, " +
+                  $"TreeDet={obstacleSet.TreeDetailMeshes?.Count ?? 0}, " +
+                  $"TreeCan={obstacleSet.TreeCanopyMeshes?.Count ?? 0}, " +
+                  $"TransShd={obstacleSet.TranslucentShadeMeshes?.Count ?? 0}"
+                : "None";
 
             string summary = $"=== Ground Surface Settings ===\n" +
                 $"Surfaces ............. {surfaceCount}\n" +
                 $"Mesh Faces ........... {totalFaces}\n" +
                 $"Analysis Points ...... {allPoints.Count}\n" +
-                $"Obstacles ............ {obstacleMeshes.Count}\n" +
+                $"Obstacles (ObsSet) ... {obsInfo}\n" +
                 $"Resolution ........... {resolution:F2} m\n" +
                 $"Layer Depths ......... d1={d1:F3}m d2={d2:F3}m\n" +
                 $"Exposure Height ...... {exposureHeight:F3} m\n" +

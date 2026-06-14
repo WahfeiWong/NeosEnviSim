@@ -397,11 +397,33 @@ $$ET_{ref} = \frac{1}{\lambda(T_{air})} \cdot \frac{\Delta \cdot (R_n - G) + \rh
 
 ### 10.1 修正短波辐射 (GHI)
 
-$$GHI_{actual} = DHI \cdot SVF + DNI \cdot \sin(\alpha) \cdot f_{exp} + \rho_{sur} \cdot GHI_{surround} \cdot (1 - SVF)$$
+$$GHI_{actual} = DHI \cdot SVF + DNI \cdot \sin(\alpha) \cdot f_{DNI} + \rho_{sur} \cdot GHI_{surround} \cdot (1 - SVF)$$
 
 其中：
 
 $$GHI_{surround} = DHI + DNI \cdot \sin(\alpha)$$
+
+**有效DNI暴露因子 $f_{DNI}$（增强版，2026-06-14）：**
+
+替代原有的二值暴露因子 $f_{exp}$（仅判断遮挡/未遮挡），引入有效DNI暴露因子 $f_{DNI}$，支持三种障碍物类型的差异化透射处理：
+
+| 击中类型 | DNI贡献 | 物理含义 |
+|:---:|:---:|:---|
+| 无遮挡 | 1.0 | 全额直接辐射 |
+| 不透光物体 (Opaque) | 0.0 | 完全阻挡，其后方Tree/Translucent均处于阴影中 |
+| 树木细节模型 (Tree) | $\exp(-k \cdot \text{LAD} \cdot s)$ | Beer-Lambert冠层透射（仅当射线路径无Opaque时） |
+| 半透明遮阳构件 (Translucent) | $\tau$ | 固定透射率透射（仅当射线路径无Opaque时） |
+
+判断逻辑：
+1. 射线路径上**有任何不透光物体** → DNI = 0（完全阻挡）
+2. 无Opaque时 → 找**从太阳方向最近**的Tree/Translucent障碍物
+3. 全部无遮挡 → DNI = 全额
+
+植被冠层透射方程（Beer-Lambert定律）：
+
+$$I_{\text{transmitted}} = I_{\text{DN}} \cdot \exp(-k \cdot \text{LAD} \cdot s)$$
+
+其中 $s$ 为光线穿过树木冠层的几何路径长度 [m]，$k$ 为消光系数，$\text{LAD}$ 为叶面积密度 [m²/m³]，$\tau$ 为遮阳构件透射率。
 
 ### 10.2 修正长波辐射
 
@@ -414,7 +436,8 @@ $$L_{sky} = HIR_{EPW} \cdot SVF$$
 | 参数 | 符号 | 单位 | 默认值 | 说明 |
 |-----------|--------|------|---------|-------------|
 | 天空视角系数 | $SVF$ | -- | 1.0（无障碍物） | [0, 1]；可见天空半球的比例 |
-| 太阳暴露因子 | $f_{exp}$ | -- | -- | [0, 1]；太阳直射未被遮挡的比例 |
+| 有效DNI暴露因子 | $f_{DNI}$ | -- | -- | [0, 1]；综合暴露与透射的DNI有效因子 |
+| 太阳暴露因子 | $f_{exp}$ | -- | -- | [0, 1]；二值：太阳直射未被遮挡的比例（遗留字段） |
 | 太阳高度角 | $\alpha$ | rad | -- | 由 SPA 太阳位置计算 |
 | 周围反射率 | $\rho_{sur}$ | -- | 0.2 | 周围表面短波反射率 |
 | 周围发射率 | $\varepsilon_{sur}$ | -- | 0.95 | 周围表面长波发射率 |
@@ -472,7 +495,7 @@ $$L_{sky} = HIR_{EPW} \cdot SVF$$
 | 端口 | 名称 | 类型 | 必填 | 说明 |
 |------|------|------|----------|-------------|
 | 0 | `GSurf` | Brep | **是** | 地面表面几何体 |
-| 1 | `Obst` | Brep | 否 | 环境障碍物 |
+| 1 | `ObsSet` | Generic | 否 | **增强版（2026-06-14）**：分类障碍物设置集（ObstacleSet）。连接ObsSet组件。支持不透光建筑、树木冠层透射（Beer-Lambert）、半透明遮阳。向后兼容：可接受List<Brep>或List<Mesh> |
 | 2 | `Res` | Number | 否 | 网格分辨率 [m] |
 | 3 | `d1` | Number | 否 | 表层深度 [m] |
 | 4 | `d2` | Number | 否 | 深层深度 [m] |
