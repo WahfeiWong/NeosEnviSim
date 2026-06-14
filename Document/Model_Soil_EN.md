@@ -429,7 +429,7 @@ $$I_{\text{transmitted}} = I_{\text{DN}} \cdot \exp(-k \cdot \text{LAD} \cdot s)
 
 Where:
 - $s$: Geometric path length through the tree canopy [m], computed by `CalculateCanopyPathLength` (entry-to-exit intersection distance with the simplified canopy mesh)
-- $k$: Extinction coefficient [-], default 0.65, typical range 0.5–0.8 (broadleaf), 0.3–0.5 (conifer)
+- $k$: Extinction coefficient [-], default 0.5, typical range 0.5–0.8 (broadleaf), 0.3–0.5 (conifer)
 - $\text{LAD}$: Leaf area density [m²/m³], default 1.0, typical range 0.5–8.0
 - $\tau$: Sunshade direct solar transmittance [-], default 0.05
 

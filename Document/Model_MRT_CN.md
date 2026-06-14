@@ -155,7 +155,7 @@ $$I_{\text{transmitted}} = I_{\text{DN}} \cdot \exp(-k \cdot \text{LAD} \cdot s)
 
 其中：
 - $s$：光线穿过树木冠层的几何路径长度 [m]，通过射线与简化冠层模型的进出交点计算
-- $k$：太阳辐射消光系数 [-]，默认 0.65，典型范围 0.5–0.8（阔叶）、0.3–0.5（针叶）
+- $k$：太阳辐射消光系数 [-]，默认 0.5，典型范围 0.5–0.8（阔叶）、0.3–0.5（针叶）
 - $\text{LAD}$：叶面积密度 [m²/m³]，默认 1.0，典型范围 0.5–8.0
 - $\tau$：遮阳构件直接太阳辐射透射率 [-]，默认 0.05
 
@@ -307,7 +307,7 @@ ObsSet 组件用于创建分类障碍物设置集（`ObstacleSet`），替代 MR
 | 0 | Tree Detail | TreeDet | Mesh List | — | 树的细节模型（树叶、枝干），来自 Tree Processor 组件 |
 | 1 | Tree Canopy | TreeCan | Mesh List | — | 树木简化冠层模型，用于计算光线穿过冠层的几何路径长度 |
 | 2 | Leaf Area Density | LAD | Number | 1.0 | 叶面积密度 [m²/m³]，表示单位冠层体积的叶面积 |
-| 3 | Extinction Coeff | k | Number | 0.65 | 太阳辐射消光系数 [-]，Beer-Lambert 定律参数，典型范围 0.5–0.8 |
+| 3 | Extinction Coeff | k | Number | 0.5 | 太阳辐射消光系数 [-]，Beer-Lambert 定律参数，典型范围 0.5–0.8 |
 | 4 | Translucent Shade | TransShd | Mesh List | — | 半透明遮阳构件（穿孔金属板、织物等） |
 | 5 | Transmittance | Tau | Number | 0.05 | 遮阳构件直接太阳辐射透射率 [-]，范围 0.0–1.0 |
 | 6 | Opaque Objects | Opaque | Mesh List | — | 不透光物体（建筑、围墙等），完全阻挡直接辐射 |

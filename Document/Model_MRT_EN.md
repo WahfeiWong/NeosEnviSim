@@ -155,7 +155,7 @@ $$I_{\text{transmitted}} = I_{\text{DN}} \cdot \exp(-k \cdot \text{LAD} \cdot s)
 
 Where:
 - $s$: Geometric path length through the tree canopy [m], computed from entry/exit intersection points of the ray with the simplified canopy mesh
-- $k$: Solar radiation extinction coefficient [-], default 0.65, typical range 0.5–0.8 (broadleaf), 0.3–0.5 (conifer)
+- $k$: Solar radiation extinction coefficient [-], default 0.5, typical range 0.5–0.8 (broadleaf), 0.3–0.5 (conifer)
 - $\text{LAD}$: Leaf area density [m²/m³], default 1.0, typical range 0.5–8.0
 - $\tau$: Sunshade direct solar transmittance [-], default 0.05
 
@@ -307,7 +307,7 @@ The ObsSet component creates a classified obstacle set (`ObstacleSet`) that repl
 | 0 | Tree Detail | TreeDet | Mesh List | — | Detailed tree geometry mesh (leaves, branches) from Tree Processor |
 | 1 | Tree Canopy | TreeCan | Mesh List | — | Simplified tree canopy envelope mesh(es) for path-length calculation |
 | 2 | Leaf Area Density | LAD | Number | 1.0 | Leaf area density [m²/m³], leaf area per unit canopy volume |
-| 3 | Extinction Coeff | k | Number | 0.65 | Solar radiation extinction coefficient [-], Beer-Lambert parameter, typical 0.5–0.8 |
+| 3 | Extinction Coeff | k | Number | 0.5 | Solar radiation extinction coefficient [-], Beer-Lambert parameter, typical 0.5–0.8 |
 | 4 | Translucent Shade | TransShd | Mesh List | — | Translucent sunshade / shading device mesh(es) |
 | 5 | Transmittance | Tau | Number | 0.05 | Direct solar transmittance of translucent sunshades [-], range 0.0–1.0 |
 | 6 | Opaque Objects | Opaque | Mesh List | — | Opaque obstacles (buildings, walls) that fully block direct radiation |
