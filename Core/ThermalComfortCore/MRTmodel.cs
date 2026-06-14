@@ -29,6 +29,11 @@ namespace ThermalComfort.Core
         /// Longwave radiation is now decomposed into THREE components based on full-spherical
         /// (4pi) view factors: sky (SVF), ground (GVF), and obstacles (OVF).
         ///
+        /// ENHANCED (2026-06-14): Fine-grained DNI transmission through vegetation
+        /// and translucent materials. The dniExposureFactor replaces exposureFactor
+        /// in direct radiation calculations, supporting Beer-Lambert canopy transmission
+        /// and translucent material transmittance.
+        ///
         /// Conservation: SVF + GVF + OVF = 1.0
         ///
         /// Longwave correction:
@@ -38,6 +43,8 @@ namespace ThermalComfort.Core
         /// Where T_surf = SurroundingSurfaceTemperature ?? airTemp
         /// (temperature of obstacle surfaces).
         /// </summary>
+        /// <param name="dniExposureFactor">Effective DNI exposure factor [0-1], accounts for
+        /// transmission through vegetation (Beer-Lambert) and translucent materials.</param>
         public static double CalculateMRT_SolarCal(
             double airTemp,
             double directNormalIrradiance,
@@ -47,7 +54,7 @@ namespace ThermalComfort.Core
             double skyViewFactor,
             double groundViewFactor,
             double obstacleViewFactor,
-            double exposureFactor,
+            double dniExposureFactor,
             double solarAltitude,
             MRTConfig config)
         {
@@ -61,7 +68,9 @@ namespace ThermalComfort.Core
 
             if (config.IncludeShortwave)
             {
-                double directComponent = exposureFactor * projectionFactor * directNormalIrradiance;
+                // ENHANCED (2026-06-14): dniExposureFactor accounts for transmission
+                // through vegetation (Beer-Lambert) and translucent materials
+                double directComponent = dniExposureFactor * projectionFactor * directNormalIrradiance;
                 double diffuseComponent = 0.5 * skyViewFactor * config.PostureFactor * diffuseHorizontalIrradiance;
                 double reflectedComponent = 0.5 * groundViewFactor * config.PostureFactor
                     * config.FloorReflectance * globalHorizontalIrradiance;
@@ -103,6 +112,10 @@ namespace ThermalComfort.Core
         /// Longwave radiation is now decomposed into THREE components based on full-spherical
         /// (4π) view factors: sky (SVF), ground (GVF), and obstacles (OVF).
         /// 
+        /// ENHANCED (2026-06-14): Fine-grained DNI transmission through vegetation
+        /// and translucent materials. The dniExposureFactor replaces exposureFactor
+        /// in direct radiation calculations.
+        ///
         /// Conservation: SVF + GVF + OVF = 1.0
         /// 
         /// The old incorrect formula groundVF = 0.5 * (1 - SVF) has been replaced.
@@ -111,6 +124,8 @@ namespace ThermalComfort.Core
         /// Ground and obstacle emissivities are now user-configurable via MRT Settings
         /// (GroundEmissivity and ObstacleEmissivity). Defaults to 0.95.
         /// </summary>
+        /// <param name="dniExposureFactor">Effective DNI exposure factor [0-1], accounts for
+        /// transmission through vegetation (Beer-Lambert) and translucent materials.</param>
         public static double CalculateMRT_RayMan(
             double airTemp,
             double directNormalIrradiance,
@@ -120,7 +135,7 @@ namespace ThermalComfort.Core
             double skyViewFactor,
             double groundViewFactor,
             double obstacleViewFactor,
-            double exposureFactor,
+            double dniExposureFactor,
             double solarAltitude,
             MRTConfig config)
         {
@@ -147,10 +162,12 @@ namespace ThermalComfort.Core
                     * groundViewFactor +
                 obstacleLongwave * obstacleViewFactor);
 
-            if (directNormalIrradiance > 0 && exposureFactor > 0)
+            if (directNormalIrradiance > 0 && dniExposureFactor > 0)
             {
                 double projectionFactor = GetProjectionFactor(solarAltitude);
-                double directSolar = exposureFactor * projectionFactor * directNormalIrradiance;
+                // ENHANCED (2026-06-14): dniExposureFactor accounts for transmission
+                // through vegetation (Beer-Lambert) and translucent materials
+                double directSolar = dniExposureFactor * projectionFactor * directNormalIrradiance;
                 mrtK4 += absorptivity * directSolar / (emissivity * stefanBoltzmann);
             }
 
@@ -167,7 +184,15 @@ namespace ThermalComfort.Core
         /// PHYSICALLY CORRECTED (2026-05-15):
         /// Now requires three view factors (SVF, GVF, OVF) from full-spherical sampling.
         /// The old two-parameter (SVF only) API is no longer supported.
+        ///
+        /// ENHANCED (2026-06-14):
+        /// Added dniExposureFactor parameter for fine-grained direct radiation transmission
+        /// through vegetation (Beer-Lambert law) and translucent materials.
+        /// When obstacleSet is not used (legacy mode), set dniExposureFactor = exposureFactor.
         /// </summary>
+        /// <param name="dniExposureFactor">Effective DNI exposure factor [0-1]. In legacy mode
+        /// (no ObstacleSet), this equals exposureFactor. With ObstacleSet, it accounts for
+        /// partial transmission through trees and translucent sunshades.</param>
         public static double CalculateMRT(
             double airTemp,
             double directNormalIrradiance,
@@ -177,7 +202,7 @@ namespace ThermalComfort.Core
             double skyViewFactor,
             double groundViewFactor,
             double obstacleViewFactor,
-            double exposureFactor,
+            double dniExposureFactor,
             double solarAltitude,
             MRTConfig config,
             bool useRayMan = false)
@@ -188,7 +213,7 @@ namespace ThermalComfort.Core
                     airTemp, directNormalIrradiance, diffuseHorizontalIrradiance,
                     globalHorizontalIrradiance, horizontalInfrared,
                     skyViewFactor, groundViewFactor, obstacleViewFactor,
-                    exposureFactor, solarAltitude, config);
+                    dniExposureFactor, solarAltitude, config);
             }
             else
             {
@@ -196,7 +221,7 @@ namespace ThermalComfort.Core
                     airTemp, directNormalIrradiance, diffuseHorizontalIrradiance,
                     globalHorizontalIrradiance, horizontalInfrared,
                     skyViewFactor, groundViewFactor, obstacleViewFactor,
-                    exposureFactor, solarAltitude, config);
+                    dniExposureFactor, solarAltitude, config);
             }
         }
 

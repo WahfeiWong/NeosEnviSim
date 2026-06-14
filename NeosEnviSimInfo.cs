@@ -13,7 +13,7 @@ namespace NeosEnviSim
         public override Bitmap Icon => Resources.icon_NeosEnviSim;
 
         //Return a short string describing the purpose of this GHA library.
-        public override string Description => "Tools for building environment optimization";
+        public override string Description => "Tools for building environment simulation";
 
         public override Guid Id => new Guid("B184E258-C42E-488E-93CB-FBA0666A0923");
 

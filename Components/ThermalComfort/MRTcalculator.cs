@@ -33,7 +33,14 @@ namespace ThermalComfort
                 "project them DOWN to ground level first before connecting here. " +
                 "The H bod parameter defines the full body height range for exposure sampling.",
                 GH_ParamAccess.list);
-            pManager.AddBrepParameter("Obstacles", "Obs", "Context geometry / obstacles as Breps for exposure calculation", GH_ParamAccess.list);
+            // ENHANCED (2026-06-14): ObstacleSet input replaces flat Brep list.
+            // Supports classified obstacles (opaque, tree, translucent) for fine-grained
+            // DNI transmission calculation via Beer-Lambert law.
+            pManager.AddGenericParameter("Obstacle Set", "ObsSet",
+                "Optional: Classified obstacle set (ObstacleSet) for exposure calculation. " +
+                "Connect ObsSet component. Supports opaque buildings, trees with canopy transmission, " +
+                "and translucent sunshades. If omitted, no obstacles are considered.",
+                GH_ParamAccess.item);
             pManager.AddGenericParameter("MRT Settings", "MRTSet", "MRT configuration settings", GH_ParamAccess.item);
             // NEW (index 4): TimeSet moved from MRTsettings to MRT component directly
             pManager.AddGenericParameter("Time Settings", "TimeSet",
@@ -81,7 +88,8 @@ namespace ThermalComfort
             pManager.AddNumberParameter("Sky View Factor", "SVF", "Sky view factor [0-1] from full-sphere (4π) sampling for each point", GH_ParamAccess.list);
             pManager.AddNumberParameter("Ground View Factor", "GVF", "Ground view factor [0-1] from full-sphere (4π) sampling for each point", GH_ParamAccess.list);
             pManager.AddNumberParameter("Obstacle View Factor", "OVF", "Obstacle view factor [0-1] from full-sphere (4π) sampling for each point", GH_ParamAccess.list);
-            pManager.AddNumberParameter("Exposure Factor", "Exp", "Solar exposure factor [0-1] for each point and hour", GH_ParamAccess.tree);
+            pManager.AddNumberParameter("Exposure Factor", "Exp", "Solar exposure factor [0-1] for each point and hour (binary: exposed or shaded)", GH_ParamAccess.tree);
+            pManager.AddNumberParameter("DNI Exposure Factor", "DNIExp", "Effective DNI exposure factor [0-1] accounting for transmission through vegetation and translucent materials", GH_ParamAccess.tree);
             pManager.AddNumberParameter("Shortwave Delta T", "dTsw", "Shortwave temperature increment [°C]", GH_ParamAccess.tree);
             pManager.AddNumberParameter("Longwave Delta T", "dTlw", "Total longwave temperature increment [°C]", GH_ParamAccess.tree);
             pManager.AddNumberParameter("LW Sky Component", "dTlw_sky", "Longwave sky component contribution [°C]", GH_ParamAccess.tree);
@@ -95,12 +103,19 @@ namespace ThermalComfort
         {
             string epwPath = "";
             List<Point3d> analysisPoints = new List<Point3d>();
-            List<Brep> obstacles = new List<Brep>();
             bool run = false;
 
             if (!DA.GetData(0, ref epwPath)) return;
             if (!DA.GetDataList(1, analysisPoints)) return;
-            DA.GetDataList(2, obstacles);
+
+            // ENHANCED (2026-06-14): Extract ObstacleSet from input (replaces flat Brep list)
+            ObstacleSet obstacleSet = null;
+            GH_ObjectWrapper obsWrapper = null;
+            if (DA.GetData(2, ref obsWrapper))
+            {
+                if (obsWrapper?.Value is ObstacleSet os) obstacleSet = os;
+            }
+
             var mrtConfig = ExtractSettings<MRTConfig>(DA, 3) ?? new MRTConfig();
 
             // NEW (index 4): TimeSet directly on MRT component
@@ -361,23 +376,44 @@ namespace ThermalComfort
                     "Tobs: not provided — using Ta (or EPW air temperature) as obstacle surface temperature fallback.");
             }
 
-            // Convert obstacles to meshes
-            List<Mesh> obstacleMeshes = new List<Mesh>();
-            foreach (var brep in obstacles)
+            // ENHANCED (2026-06-14): Use ObstacleSet for classified obstacle handling.
+            // Flatten all meshes for view factor calculations that don't need classification.
+            List<Mesh> allObstacleMeshes = obstacleSet?.GetAllMeshes() ?? new List<Mesh>();
+
+            // Backward compatibility: if user provides legacy Brep list (wrapped in GH_ObjectWrapper
+            // as List<Brep> or List<Mesh>), convert them to opaque meshes in a temporary ObstacleSet.
+            if ((obstacleSet == null || !obstacleSet.HasAnyObstacles) && obsWrapper?.Value != null)
             {
-                if (brep == null || !brep.IsValid) continue;
-                var meshes = Mesh.CreateFromBrep(brep, MeshingParameters.Default);
-                if (meshes != null)
+                if (obsWrapper.Value is List<Brep> brepList)
                 {
-                    foreach (var m in meshes)
+                    var legacyMeshes = new List<Mesh>();
+                    foreach (var brep in brepList)
                     {
-                        if (m != null && m.IsValid) obstacleMeshes.Add(m);
+                        if (brep == null || !brep.IsValid) continue;
+                        var meshes = Mesh.CreateFromBrep(brep, MeshingParameters.Default);
+                        if (meshes != null)
+                            foreach (var m in meshes)
+                                if (m != null && m.IsValid) legacyMeshes.Add(m);
                     }
+                    obstacleSet = new ObstacleSet { OpaqueObjectMeshes = legacyMeshes };
+                    allObstacleMeshes = legacyMeshes;
+                }
+                else if (obsWrapper.Value is List<Mesh> meshList)
+                {
+                    obstacleSet = new ObstacleSet { OpaqueObjectMeshes = meshList };
+                    allObstacleMeshes = meshList;
                 }
             }
 
+            string obstacleInfo = obstacleSet != null && obstacleSet.HasAnyObstacles
+                ? $"ObsSet: Opaque={obstacleSet.OpaqueObjectMeshes?.Count ?? 0}, " +
+                  $"TreeDetail={obstacleSet.TreeDetailMeshes?.Count ?? 0}, " +
+                  $"Canopy={obstacleSet.TreeCanopyMeshes?.Count ?? 0}, " +
+                  $"Translucent={obstacleSet.TranslucentShadeMeshes?.Count ?? 0}"
+                : "No obstacles";
+
             AddRuntimeMessage(GH_RuntimeMessageLevel.Remark,
-                $"Analysis points: {analysisPoints.Count}, Obstacles: {obstacleMeshes.Count} meshes");
+                $"Analysis points: {analysisPoints.Count}, {obstacleInfo}");
 
             // =====================================================================
             // FULL-SPHERE (4π) view factor calculation
@@ -386,10 +422,10 @@ namespace ThermalComfort
             double[] groundViewFactors = new double[nPoints];
             double[] obstacleViewFactors = new double[nPoints];
 
-            if (obstacleMeshes.Count > 0)
+            if (allObstacleMeshes.Count > 0)
             {
                 HumanExposureModel.CalculateSphericalViewFactorsBatch(
-                    analysisPoints, obstacleMeshes,
+                    analysisPoints, allObstacleMeshes,
                     skyViewFactors, groundViewFactors, obstacleViewFactors,
                     mrtConfig.AnalysisHeight, mrtConfig.SVFSampleCount, mrtConfig.MaxRayDistance);
             }
@@ -406,6 +442,7 @@ namespace ThermalComfort
             // Output structures
             GH_Structure<GH_Number> mrtTree = new GH_Structure<GH_Number>();
             GH_Structure<GH_Number> exposureTree = new GH_Structure<GH_Number>();
+            GH_Structure<GH_Number> dniExposureTree = new GH_Structure<GH_Number>();
             GH_Structure<GH_Number> dTSwTree = new GH_Structure<GH_Number>();
             GH_Structure<GH_Number> dTLwTree = new GH_Structure<GH_Number>();
             GH_Structure<GH_Number> dTLwSkyTree = new GH_Structure<GH_Number>();
@@ -454,6 +491,7 @@ namespace ThermalComfort
 
                         mrtTree.Append(new GH_Number(fallbackAirTemp), new GH_Path(p));
                         exposureTree.Append(new GH_Number(1.0), new GH_Path(p));
+                        dniExposureTree.Append(new GH_Number(1.0), new GH_Path(p));
                         dTSwTree.Append(new GH_Number(0.0), new GH_Path(p));
                         dTLwTree.Append(new GH_Number(0.0), new GH_Path(p));
                         dTLwSkyTree.Append(new GH_Number(0.0), new GH_Path(p));
@@ -467,26 +505,50 @@ namespace ThermalComfort
 
                 double solarAltitude = MRTModel.SolarAltitudeFromZenith(spaData.Zenith);
 
-                // Exposure factors
+                // ENHANCED (2026-06-14): Calculate both exposure factor (binary) and
+                // DNI exposure factor (with transmission through vegetation/translucent materials)
                 double[] exposureFactors = new double[nPoints];
+                double[] dniExposureFactors = new double[nPoints];
                 Vector3d sunVec = new Vector3d();
 
                 if (spaData.Zenith < 90.8334)
                 {
                     sunVec = SolarGeometry.SunVectorFromAzimuthZenith(spaData.Azimuth, spaData.Zenith);
                     sunVectors.Add(sunVec);
-                    if (obstacleMeshes.Count > 0)
+                    if (obstacleSet != null && obstacleSet.HasAnyObstacles)
+                    {
+                        // Use enhanced calculation with obstacle classification and transmission
+                        HumanExposureModel.CalculateExposureFactorsWithTransmissionBatch(
+                            analysisPoints, sunVec, obstacleSet,
+                            exposureFactors, dniExposureFactors,
+                            mrtConfig.BodyHeight, mrtConfig.ExposureSamplePoints, mrtConfig.MaxRayDistance);
+                    }
+                    else if (allObstacleMeshes.Count > 0)
+                    {
+                        // Legacy mode: no ObstacleSet, treat all as opaque
                         exposureFactors = HumanExposureModel.CalculateExposureFactorsBatch(
-                            analysisPoints, sunVec, obstacleMeshes,
+                            analysisPoints, sunVec, allObstacleMeshes,
                             mrtConfig.BodyHeight, mrtConfig.AnalysisHeight,
                             mrtConfig.ExposureSamplePoints, mrtConfig.MaxRayDistance);
+                        for (int i = 0; i < nPoints; i++) dniExposureFactors[i] = exposureFactors[i];
+                    }
                     else
-                        for (int i = 0; i < nPoints; i++) exposureFactors[i] = 1.0;
+                    {
+                        for (int i = 0; i < nPoints; i++)
+                        {
+                            exposureFactors[i] = 1.0;
+                            dniExposureFactors[i] = 1.0;
+                        }
+                    }
                 }
                 else
                 {
                     sunVectors.Add(Vector3d.Unset);
-                    for (int i = 0; i < nPoints; i++) exposureFactors[i] = 0.0;
+                    for (int i = 0; i < nPoints; i++)
+                    {
+                        exposureFactors[i] = 0.0;
+                        dniExposureFactors[i] = 0.0;
+                    }
                 }
 
                 // Sky emissivity
@@ -570,6 +632,9 @@ namespace ThermalComfort
                         ObstacleEmissivity = mrtConfig.ObstacleEmissivity   // from MRT Settings
                     };
 
+                    // ENHANCED (2026-06-14): Pass dniExposureFactor to MRT calculation
+                    // for fine-grained direct radiation transmission through vegetation
+                    // and translucent materials (Beer-Lambert law).
                     double mrt = MRTModel.CalculateMRT(
                         pointAirTemp,
                         record.DirectNormalRadiation,
@@ -577,7 +642,7 @@ namespace ThermalComfort
                         record.GlobalHorizontalRadiation,
                         record.HorizontalInfraredRadiation,
                         skyViewFactors[p], groundViewFactors[p], obstacleViewFactors[p],
-                        exposureFactors[p], solarAltitude, hourConfig, hourConfig.UseRayManModel);
+                        dniExposureFactors[p], solarAltitude, hourConfig, hourConfig.UseRayManModel);
 
                     // THREE-COMPONENT longwave decomposition
                     double surfaceTemp = pointAirTemp;
@@ -601,6 +666,7 @@ namespace ThermalComfort
 
                     mrtTree.Append(new GH_Number(mrt), new GH_Path(p));
                     exposureTree.Append(new GH_Number(exposureFactors[p]), new GH_Path(p));
+                    dniExposureTree.Append(new GH_Number(dniExposureFactors[p]), new GH_Path(p));
                     dTSwTree.Append(new GH_Number(deltaT_sw), new GH_Path(p));
                     dTLwTree.Append(new GH_Number(deltaT_lw_total), new GH_Path(p));
                     dTLwSkyTree.Append(new GH_Number(deltaT_lw_sky), new GH_Path(p));
@@ -619,17 +685,21 @@ namespace ThermalComfort
             DA.SetDataList(2, groundViewFactors.Select(s => new GH_Number(s)).Cast<IGH_Goo>().ToList());
             DA.SetDataList(3, obstacleViewFactors.Select(s => new GH_Number(s)).Cast<IGH_Goo>().ToList());
             DA.SetDataTree(4, exposureTree);
-            DA.SetDataTree(5, dTSwTree);
-            DA.SetDataTree(6, dTLwTree);
-            DA.SetDataTree(7, dTLwSkyTree);
-            DA.SetDataTree(8, dTLwGroundTree);
-            DA.SetDataTree(9, dTLwObsTree);
-            DA.SetDataList(10, hourlyAvgMRT);
-            DA.SetDataList(11, sunVectors);
+            DA.SetDataTree(5, dniExposureTree);
+            DA.SetDataTree(6, dTSwTree);
+            DA.SetDataTree(7, dTLwTree);
+            DA.SetDataTree(8, dTLwSkyTree);
+            DA.SetDataTree(9, dTLwGroundTree);
+            DA.SetDataTree(10, dTLwObsTree);
+            DA.SetDataList(11, hourlyAvgMRT);
+            DA.SetDataList(12, sunVectors);
 
+            double avgExp = exposureTree.FlattenData().OfType<GH_Number>().Select(n => n.Value).DefaultIfEmpty(0).Average();
+            double avgDNIExp = dniExposureTree.FlattenData().OfType<GH_Number>().Select(n => n.Value).DefaultIfEmpty(0).Average();
             AddRuntimeMessage(GH_RuntimeMessageLevel.Remark,
                 $"MRT complete: {nPoints} points x {numHours}h. " +
-                $"SVF={skyViewFactors.Average():F3} GVF={groundViewFactors.Average():F3} OVF={obstacleViewFactors.Average():F3}");
+                $"SVF={skyViewFactors.Average():F3} GVF={groundViewFactors.Average():F3} OVF={obstacleViewFactors.Average():F3} " +
+                $"Exp={avgExp:F3} DNIExp={avgDNIExp:F3}");
         }
         private T ExtractSettings<T>(IGH_DataAccess DA, int index) where T : class
         {

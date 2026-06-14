@@ -465,7 +465,114 @@ namespace Common.Core
 
     #endregion
 
-    #region MRT Calculation Configs (unchanged)
+    #region MRT Calculation Configs
+
+    /// <summary>
+    /// Obstacle type classification for fine-grained direct radiation (DNI) calculation.
+    /// Used to determine how solar rays interact with different obstacle materials.
+    /// </summary>
+    public enum ObstacleType
+    {
+        /// <summary>No obstacle hit.</summary>
+        None,
+        /// <summary>Opaque obstacle (building, wall, etc.) — fully blocks direct radiation.</summary>
+        Opaque,
+        /// <summary>Tree detail mesh hit — DNI attenuated via Beer-Lambert law through canopy.</summary>
+        Tree,
+        /// <summary>Translucent sunshade — DNI attenuated by fixed transmittance factor.</summary>
+        Translucent
+    }
+
+    /// <summary>
+    /// Structured obstacle set for MRT calculation with classified obstacle types.
+    /// Replaces the flat List&lt;Brep&gt; obstacle input to support fine-grained DNI
+    /// transmission through vegetation and translucent materials.
+    ///
+    /// Each obstacle category is used for both exposure factor calculation and
+    /// direct radiation transmission computation:
+    /// - Opaque objects: fully block DNI (original behavior)
+    /// - Tree detail meshes: trigger Beer-Lambert canopy attenuation
+    /// - Tree canopy meshes: define canopy geometry for path-length integration
+    /// - Translucent sunshades: apply fixed transmittance factor
+    /// </summary>
+    [Serializable]
+    public class ObstacleSet
+    {
+        /// <summary>
+        /// Detailed tree geometry (leaves, branches) for ray-hit detection.
+        /// When a sun ray hits this mesh, the point is considered shaded but
+        /// DNI is partially transmitted via Beer-Lambert law through the canopy.
+        /// </summary>
+        public List<Rhino.Geometry.Mesh> TreeDetailMeshes { get; set; } = new List<Rhino.Geometry.Mesh>();
+
+        /// <summary>
+        /// Simplified tree canopy envelopes for canopy path-length calculation.
+        /// Used to compute the geometric path length s [m] through vegetation
+        /// along the solar ray direction (entry to exit intersection points).
+        /// </summary>
+        public List<Rhino.Geometry.Mesh> TreeCanopyMeshes { get; set; } = new List<Rhino.Geometry.Mesh>();
+
+        /// <summary>
+        /// Leaf Area Density (LAD) [m²/m³], default 1.0.
+        /// Represents the leaf area per unit volume of canopy.
+        /// Typical range: 0.5–8.0 m²/m³ depending on species and season.
+        /// </summary>
+        public double LeafAreaDensity { get; set; } = 1.0;
+
+        /// <summary>
+        /// Solar radiation extinction coefficient k [-], default 0.65.
+        /// Typical range: 0.5–0.8 for broadleaf trees, 0.3–0.5 for conifers.
+        /// Used in Beer-Lambert law: I_transmitted = I_DN * exp(-k * LAD * s).
+        /// </summary>
+        public double ExtinctionCoefficient { get; set; } = 0.65;
+
+        /// <summary>
+        /// Translucent sunshade / shading device meshes.
+        /// These materials partially transmit direct solar radiation.
+        /// </summary>
+        public List<Rhino.Geometry.Mesh> TranslucentShadeMeshes { get; set; } = new List<Rhino.Geometry.Mesh>();
+
+        /// <summary>
+        /// Direct solar radiation transmittance of translucent sunshades [-], default 0.05.
+        /// Range: 0.0 (opaque) to 1.0 (fully transparent).
+        /// Typical values: perforated metal 0.05–0.15, fabric 0.02–0.30, PC sheet 0.60–0.85.
+        /// </summary>
+        public double TranslucentTransmittance { get; set; } = 0.05;
+
+        /// <summary>
+        /// Opaque objects (buildings, walls, solid structures) that fully block direct radiation.
+        /// When a sun ray hits an opaque object, DNI contribution is zero for that sample point.
+        /// </summary>
+        public List<Rhino.Geometry.Mesh> OpaqueObjectMeshes { get; set; } = new List<Rhino.Geometry.Mesh>();
+
+        /// <summary>
+        /// Check if this obstacle set contains any meshes at all.
+        /// </summary>
+        public bool HasAnyObstacles
+        {
+            get
+            {
+                return (TreeDetailMeshes != null && TreeDetailMeshes.Count > 0) ||
+                       (TreeCanopyMeshes != null && TreeCanopyMeshes.Count > 0) ||
+                       (TranslucentShadeMeshes != null && TranslucentShadeMeshes.Count > 0) ||
+                       (OpaqueObjectMeshes != null && OpaqueObjectMeshes.Count > 0);
+            }
+        }
+
+        /// <summary>
+        /// Get all obstacle meshes as a flat list (for backward-compatible view factor / SVF calculations
+        /// that do not require obstacle classification).
+        /// </summary>
+        public List<Rhino.Geometry.Mesh> GetAllMeshes()
+        {
+            var all = new List<Rhino.Geometry.Mesh>();
+            if (TreeDetailMeshes != null) all.AddRange(TreeDetailMeshes);
+            if (TreeCanopyMeshes != null) all.AddRange(TreeCanopyMeshes);
+            if (TranslucentShadeMeshes != null) all.AddRange(TranslucentShadeMeshes);
+            if (OpaqueObjectMeshes != null) all.AddRange(OpaqueObjectMeshes);
+            return all;
+        }
+    }
 
     [Serializable]
     public class MRTConfig

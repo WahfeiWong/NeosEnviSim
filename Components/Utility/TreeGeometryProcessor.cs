@@ -44,8 +44,8 @@ namespace NeosUtility
             pManager.AddNumberParameter("Leaf Area", "LA", "Total leaf area (sum of all mesh areas)", GH_ParamAccess.item);
             pManager.AddNumberParameter("LAI", "LAI", "Leaf Area Index (Leaf Area / Projection Area)", GH_ParamAccess.item);
             pManager.AddNumberParameter("LAD", "LAD", "Leaf Area Density (Leaf Area / Crown Volume)", GH_ParamAccess.item);
-            pManager.AddMeshParameter("Scaled Tree", "ST", "Scaled detailed tree model (merged meshes)", GH_ParamAccess.item);
-            pManager.AddMeshParameter("Tree Canopy", "TC", "Simplified canopy model (generated using Mesh.ShrinkWrap or Convex Hull)", GH_ParamAccess.item);
+            pManager.AddMeshParameter("Tree Detail", "TreeDet", "Scaled detailed tree model (merged meshes)", GH_ParamAccess.item);
+            pManager.AddMeshParameter("Tree Canopy", "TreeCan", "Simplified canopy model (generated using Mesh.ShrinkWrap or Convex Hull)", GH_ParamAccess.item);
         }
 
         /// <summary>

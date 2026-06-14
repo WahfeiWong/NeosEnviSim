@@ -14,10 +14,10 @@ Based on the SolarCal model from ASHRAE Standard 55, combining shortwave solar r
 
 The solar radiation flux received by the human body consists of direct radiation, diffuse radiation, and ground-reflected radiation:
 
-$$I_{\text{body}} = f_{\text{exp}} \cdot f_p(\gamma) \cdot I_{\text{DN}} + \frac{1}{2} f \cdot F_{\text{SVF}} \cdot I_{\text{DH}} + \frac{1}{2} f \cdot F_{\text{GVF}} \cdot \rho_g \cdot I_{\text{GH}}$$
+$$I_{\text{body}} = f_{\text{DNI}} \cdot f_p(\gamma) \cdot I_{\text{DN}} + \frac{1}{2} f \cdot F_{\text{SVF}} \cdot I_{\text{DH}} + \frac{1}{2} f \cdot F_{\text{GVF}} \cdot \rho_g \cdot I_{\text{GH}}$$
 
 Where:
-- $f_{\text{exp}}$: Exposure factor (0–1), computed by backward ray tracing
+- $f_{\text{DNI}}$: Effective DNI exposure factor (0–1), computed by backward ray tracing with obstacle transmission
 - $f_p(\gamma)$: Solar projection coefficient (see equation below)
 - $I_{\text{DN}}$: Direct normal irradiance [W/m²]
 - $I_{\text{DH}}$: Horizontal diffuse irradiance [W/m²]
@@ -26,6 +26,34 @@ Where:
 - $F_{\text{SVF}}$: Sky view factor
 - $F_{\text{GVF}}$: Ground view factor
 - $\rho_g$: Ground reflectance
+
+**Effective DNI Exposure Factor $f_{\text{DNI}}$ (Enhanced, 2026-06-14):**
+
+The traditional exposure factor $f_{\text{exp}}$ only determines whether a sample point is shaded (binary: 0 or 1). To enable fine-grained direct radiation calculation under obstacles, the effective DNI exposure factor $f_{\text{DNI}}$ is introduced, supporting differentiated treatment of three obstacle types.
+
+**Physical Logic Correction (2026-06-14):** Light travels from the sun toward the ground (forward direction). The code uses backward ray tracing (casting rays from the human sample point toward the sun). The critical physical constraint is: **Opaque objects have absolute blocking priority** — if any opaque obstacle exists on the ray path, all tree or translucent sunshade obstacles behind it are in the building's shadow and must NOT contribute to DNI transmission.
+
+Decision logic (corrected):
+1. **Any opaque object on the ray path** → DNI = 0 (fully blocked)
+2. No opaque → find the **farthest** Tree/Translucent intersection from the human (equivalent to the first obstacle encountered from the sun direction)
+3. No obstacles at all → full DNI
+
+| Hit Type | DNI Contribution | Physical Meaning |
+|:---:|:---:|:---|
+| No occlusion | 1.0 | Full direct radiation |
+| Opaque object | 0.0 | Fully blocked; all Tree/Translucent behind it are in shadow |
+| Tree detail mesh | $\exp(-k \cdot \text{LAD} \cdot s)$ | Beer-Lambert canopy transmission (only when no Opaque on ray path) |
+| Translucent sunshade | $\tau$ | Fixed transmittance (only when no Opaque on ray path) |
+
+The effective DNI exposure factor is the average of all sample point contributions:
+
+$$f_{\text{DNI}} = \frac{1}{N} \sum_{i=1}^{N} \text{DNI}_{\text{contrib},i}$$
+
+Where canopy path length $s$ [m] is the distance between entry and exit intersection points of the ray with the simplified canopy mesh, $k$ is the solar extinction coefficient (default 0.65), $\text{LAD}$ is leaf area density [m²/m³], and $\tau$ is the sunshade direct solar transmittance.
+
+**Beer-Lambert Canopy Transmission Equation:**
+
+$$I_{\text{transmitted}} = I_{\text{DN}} \cdot \exp(-k \cdot \text{LAD} \cdot s)$$
 
 MRT increment due to shortwave radiation:
 
@@ -91,9 +119,11 @@ $$L_g = \varepsilon_g \cdot \sigma \cdot T_{g,\text{K}}^4$$
 
 $$L_{\text{obs}} = \varepsilon_{\text{obs}} \cdot \sigma \cdot T_{\text{obs,K}}^4$$
 
-Direct solar radiation term (applied only when $I_{\text{DN}} > 0$ and $f_{\text{exp}} > 0$):
+Direct solar radiation term (applied only when $I_{\text{DN}} > 0$ and $f_{\text{DNI}} > 0$):
 
-$$I_{\text{direct}} = f_{\text{exp}} \cdot f_p(\gamma) \cdot I_{\text{DN}}$$
+$$I_{\text{direct}} = f_{\text{DNI}} \cdot f_p(\gamma) \cdot I_{\text{DN}}$$
+
+Where $f_{\text{DNI}}$ is the effective DNI exposure factor, which has already incorporated vegetation canopy transmission (Beer-Lambert law) and translucent material transmission.
 
 ### 1.3 Unified Entry Point
 
@@ -125,6 +155,26 @@ $$f_{\text{exp}} = \frac{N_{\text{exposed}}}{N_{\text{total}}}$$
 | samplePointCount | - | 3 | Number of sampling points in the height direction |
 | maxRayDistance | m | 500.0 | Maximum ray tracing distance |
 | rayOffset | m | 0 | Ray starting point offset |
+
+**Effective DNI Exposure Factor $f_{\text{DNI}}$ Calculation (Enhanced, 2026-06-14):**
+
+The new method `CalculateExposureFactorsWithTransmission` simultaneously computes both the traditional exposure factor $f_{\text{exp}}$ and the effective DNI exposure factor $f_{\text{DNI}}$:
+
+- $f_{\text{exp}}$: Binary exposure ratio (shaded/unshaded only)
+- $f_{\text{DNI}}$: DNI effective factor combining exposure and transmission, replacing $f_{\text{exp}}$ in direct radiation MRT calculation
+
+For each sample point, the corrected ray classification logic:
+1. Check all Opaque meshes first — **any intersection immediately returns Opaque** (DNI = 0; all Tree/Translucent behind it are in shadow)
+2. No opaque intersection → find the **farthest** Tree/Translucent intersection from the human (equivalent to the first obstacle from the sun direction)
+3. If a ray intersects multiple non-opaque obstacle types, the **nearest from the sun direction** (farthest from the human) determines the obstacle type
+
+**Vegetation Canopy Path Length Calculation:**
+
+Using `CalculateCanopyPathLength`, the geometric path length is computed via `MeshLine` ray intersection with the simplified canopy mesh:
+
+$$s = t_{\text{exit}} - t_{\text{entry}}$$
+
+Where $t_{\text{entry}}$ is the first valid intersection parameter where the ray enters the canopy, and $t_{\text{exit}}$ is the last valid intersection where it exits.
 
 ### 2.2 Full 4π Spherical View Factor Decomposition
 
@@ -169,7 +219,7 @@ $$z_i = \sqrt{1 - \frac{i}{N}}, \quad i = 0, 1, \ldots, N-1$$
 |:---:|:---:|:---:|:---|
 | 0 | EPW File | Text | EPW weather file path |
 | 1 | Analysis Points | Point3d List | Ground analysis points (must be located at ground surface Z=0, not meteorological height) |
-| 2 | Obstacles | Brep List | Obstacles / environmental geometry (optional) |
+| 2 | Obstacle Set | Generic | **Enhanced (2026-06-14)**: Classified obstacle set (ObsSet) supporting opaque, tree, and translucent obstacles. Connect ObsSet component. Backward compatible: accepts List<Brep> or List<Mesh> as opaque obstacles (optional) |
 | 3 | MRT Settings | Generic | MRT configuration settings (optional, default new settings) |
 | 4 | Time Settings | Generic | Simulation time period (optional, default full year 8760h) |
 | 5 | Air Temperature (Ta) | Number Tree | Air temperature [°C], supports 4 input modes (optional) |
@@ -194,14 +244,15 @@ $$z_i = \sqrt{1 - \frac{i}{N}}, \quad i = 0, 1, \ldots, N-1$$
 | 1 | SVF | Sky view factor [0–1], full 4π sampling |
 | 2 | GVF | Ground view factor [0–1], full 4π sampling |
 | 3 | OVF | Obstacle view factor [0–1], full 4π sampling |
-| 4 | Exp | Solar exposure factor [0–1], per point per hour |
-| 5 | dT_sw | MRT increment due to shortwave radiation [°C] |
-| 6 | dT_lw | Total MRT increment due to longwave radiation [°C] |
-| 7 | dT_lw_sky | Sky longwave component contribution [°C] |
-| 8 | dT_lw_grd | Ground longwave component contribution [°C] |
-| 9 | dT_lw_obs | Obstacle longwave component contribution [°C] |
-| 10 | HrMRT | Hourly average MRT of all points [°C] |
-| 11 | SunVec | Solar vector for each analysis time step |
+| 4 | Exp | Solar exposure factor $f_{\text{exp}}$ [0–1], per point per hour (binary: shaded/unshaded) |
+| 5 | DNIExp | **New**: Effective DNI exposure factor $f_{\text{DNI}}$ [0–1], combining exposure and transmission |
+| 6 | dT_sw | MRT increment due to shortwave radiation [°C] |
+| 7 | dT_lw | Total MRT increment due to longwave radiation [°C] |
+| 8 | dT_lw_sky | Sky longwave component contribution [°C] |
+| 9 | dT_lw_grd | Ground longwave component contribution [°C] |
+| 10 | dT_lw_obs | Obstacle longwave component contribution [°C] |
+| 11 | HrMRT | Hourly average MRT of all points [°C] |
+| 12 | SunVec | Solar vector for each analysis time step |
 
 ---
 
@@ -228,7 +279,55 @@ $$z_i = \sqrt{1 - \frac{i}{N}}, \quad i = 0, 1, \ldots, N-1$$
 
 ---
 
-## 5. References
+## 3. Obstacle Set Component (ObsSetSettings.cs)
+
+### 3.1 Description
+
+The ObsSet component creates a classified obstacle set (`ObstacleSet`) that replaces the original flat Brep list input for the MRT component. By classifying obstacles into opaque objects, trees (with canopy transmission), and translucent sunshades, it enables fine-grained direct normal irradiance (DNI) calculation.
+
+**Key Principle:**
+- When a sample point is blocked by backward ray tracing, the traditional method completely ignores DNI contribution ($f_{\text{exp}}=0$ → DNI=0)
+- The enhanced method computes partial DNI transmission based on obstacle type, using Beer-Lambert law for vegetation and fixed transmittance for translucent materials
+- The effective DNI exposure factor $f_{\text{DNI}}$ combines exposure and transmission effects, replacing $f_{\text{exp}}$ in direct radiation calculations
+
+### 3.2 Input Parameters
+
+| Index | Parameter | ID | Type | Default | Description |
+|:---:|:---:|:---:|:---:|:---:|:---|
+| 0 | Tree Detail | TreeDet | Mesh List | — | Detailed tree geometry mesh (leaves, branches) from Tree Processor |
+| 1 | Tree Canopy | TreeCan | Mesh List | — | Simplified tree canopy envelope mesh(es) for path-length calculation |
+| 2 | Leaf Area Density | LAD | Number | 1.0 | Leaf area density [m²/m³], leaf area per unit canopy volume |
+| 3 | Extinction Coeff | k | Number | 0.65 | Solar radiation extinction coefficient [-], Beer-Lambert parameter, typical 0.5–0.8 |
+| 4 | Translucent Shade | TransShd | Mesh List | — | Translucent sunshade / shading device mesh(es) |
+| 5 | Transmittance | Tau | Number | 0.05 | Direct solar transmittance of translucent sunshades [-], range 0.0–1.0 |
+| 6 | Opaque Objects | Opaque | Mesh List | — | Opaque obstacles (buildings, walls) that fully block direct radiation |
+
+**Typical Transmittance Reference Values:**
+
+| Material Type | Transmittance Range |
+|:---:|:---:|
+| Perforated metal | 0.05–0.15 |
+| Shade fabric | 0.02–0.30 |
+| Polycarbonate (PC) sheet | 0.60–0.85 |
+| Glass | 0.70–0.90 |
+
+### 3.3 Output Parameters
+
+| Index | Parameter | Description |
+|:---:|:---:|:---|
+| 0 | ObsSet | Classified obstacle set, connect to MRT component's Obstacle Set input |
+
+### 3.4 Usage Notes
+
+1. **Tree Detail vs Tree Canopy**: Tree Detail is used for ray-hit detection (determining if a point is under tree shade), while Tree Canopy is used for path-length calculation (distance the ray travels through the canopy). Both are required; if Tree Detail is provided without Tree Canopy, the component issues a warning and DNI transmission uses zero path length.
+
+2. **Backward Compatibility**: The MRT component's Obstacle Set input remains backward compatible, still accepting List<Brep> or List<Mesh> inputs (automatically classified as Opaque obstacles).
+
+3. **Mesh Input**: Supports direct Mesh type input. If Surface or Brep types are provided, Grasshopper can implicitly convert them to Mesh.
+
+---
+
+## 4. References
 
 1. ASHRAE Standard 55-2017: Thermal Environmental Conditions for Human Occupancy. American Society of Heating, Refrigerating and Air-Conditioning Engineers, Atlanta, GA, 2017.
 
