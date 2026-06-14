@@ -49,17 +49,17 @@ namespace ThermalComfort
 
             // (2) Leaf Area Density (LAD)
             pManager.AddNumberParameter("Leaf Area Density", "LAD",
-                "Leaf Area Density (LAD) [m²/m³]. Leaf area per unit volume of canopy.\n " +
+                "Leaf Area Density (LAD) [m²/m³]. Leaf area per unit volume of canopy.\n" +
                 "Default 1.0. Typical range: 0.5–8.0 depending on species and season." +
-                "\nThe internal code limits the range of LAD to 0.01–50",
+                "\nThe internal code limits the range of LAD to 0.01–50.",
                 GH_ParamAccess.item, 1.0);
 
             // (3) Extinction coefficient k
             pManager.AddNumberParameter("Extinction Coeff", "k",
-                "Solar radiation extinction coefficient k [-] for Beer-Lambert law.\n " +
-                "Default 0.5. Typical range: 0.5–0.8 (broadleaf), 0.3–0.5 (conifer).\n " +
+                "Solar radiation extinction coefficient k [-] for Beer-Lambert law.\n" +
+                "Default 0.5. Typical range: 0.5–0.8 (broadleaf), 0.3–0.5 (conifer).\n" +
                 "Equation: I_t = I_DN * exp(-k * LAD * s)." +
-                "\nThe internal code limits the range of k to 0.01–1",
+                "\nThe internal code limits the range of k to 0.01–1.",
                 GH_ParamAccess.item, 0.5);
 
             // (4) Translucent sunshade meshes

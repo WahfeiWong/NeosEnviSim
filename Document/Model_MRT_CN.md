@@ -1,6 +1,8 @@
 # MRT (Mean Radiant Temperature) 模块
 
-本模块用于计算室外环境中人体的平均辐射温度（MRT），基于反向光线追踪的建筑/植被遮挡分析，支持SolarCal（ASHRAE 55）和RayMan两种计算模型，并采用全4π球面视角系数分解实现物理上正确的长波辐射计算。
+本模块用于计算室外环境中人体的平均辐射温度（MRT），基于反向光线追踪的建筑/植被遮挡分析，支持 SolarCal（ASHRAE 55）和 RayMan 两种计算模型，并采用全 4π 球面视角系数分解实现物理上正确的长波辐射计算。
+
+**增强版（2026-06-14）：** 引入精细化 DNI（直接法向辐射）暴露因子计算，支持三种障碍物类型的差异化透射处理：不透光物体（完全阻挡）、树木（Beer-Lambert 冠层透射）、半透明遮阳构件（固定透射率）。通过分类障碍物设置集（ObstacleSet）替代原有的平面 Brep 列表输入，实现更精确的直接辐射计算。
 
 ---
 
@@ -14,10 +16,10 @@
 
 人体接收的太阳辐射通量由直接辐射、散射辐射和地面反射三部分组成：
 
-$$I_{\text{body}} = f_{\text{exp}} \cdot f_p(\gamma) \cdot I_{\text{DN}} + \frac{1}{2} f \cdot F_{\text{SVF}} \cdot I_{\text{DH}} + \frac{1}{2} f \cdot F_{\text{GVF}} \cdot \rho_g \cdot I_{\text{GH}}$$
+$$I_{\text{body}} = f_{\text{DNI}} \cdot f_p(\gamma) \cdot I_{\text{DN}} + \frac{1}{2} f \cdot F_{\text{SVF}} \cdot I_{\text{DH}} + \frac{1}{2} f \cdot F_{\text{GVF}} \cdot \rho_g \cdot I_{\text{GH}}$$
 
 其中：
-- $f_{\text{exp}}$：暴露因子（0–1），由反向光线追踪计算
+- $f_{\text{DNI}}$：**有效 DNI 暴露因子**（0–1），综合暴露与透射效应（见第 2.1 节增强说明）
 - $f_p(\gamma)$：太阳投影系数（见下式）
 - $I_{\text{DN}}$：直接法向辐射 [W/m²]
 - $I_{\text{DH}}$：水平面散射辐射 [W/m²]
@@ -27,7 +29,9 @@ $$I_{\text{body}} = f_{\text{exp}} \cdot f_p(\gamma) \cdot I_{\text{DN}} + \frac
 - $F_{\text{GVF}}$：地面视角系数
 - $\rho_g$：地面反射率
 
-短波引起的MRT增量：
+> **注意（2026-06-14）：** 直接辐射项现已使用有效 DNI 暴露因子 $f_{\text{DNI}}$ 替代传统的二值暴露因子 $f_{\text{exp}}$。$f_{\text{DNI}}$ 综合考虑了障碍物类型（不透光/树木/半透明遮阳）对直接辐射的差异化透射效应。当未连接 ObsSet 组件（无障碍物分类）时，$f_{\text{DNI}} = f_{\text{exp}}$，保持向后兼容。
+
+短波引起的 MRT 增量：
 
 $$\Delta T_{\text{sw}} = \frac{I_{\text{body}} \cdot (\alpha / \varepsilon)}{f \cdot h_r}$$
 
@@ -49,7 +53,7 @@ $$\Delta T_{\text{lw}} = c_{\text{lw}} \cdot \left[ F_{\text{SVF}} \cdot (T_{\te
 
 $$F_{\text{SVF}} + F_{\text{GVF}} + F_{\text{OVF}} = 1.0$$
 
-**最终MRT：**
+**最终 MRT：**
 
 $$T_{\text{MRT}} = T_a + \Delta T_{\text{sw}} + \Delta T_{\text{lw}}$$
 
@@ -91,9 +95,11 @@ $$L_g = \varepsilon_g \cdot \sigma \cdot T_{g,\text{K}}^4$$
 
 $$L_{\text{obs}} = \varepsilon_{\text{obs}} \cdot \sigma \cdot T_{\text{obs,K}}^4$$
 
-直接太阳辐射项（仅当 $I_{\text{DN}} > 0$ 且 $f_{\text{exp}} > 0$ 时）：
+直接太阳辐射项（仅当 $I_{\text{DN}} > 0$ 且 $f_{\text{DNI}} > 0$ 时）：
 
-$$I_{\text{direct}} = f_{\text{exp}} \cdot f_p(\gamma) \cdot I_{\text{DN}}$$
+$$I_{\text{direct}} = f_{\text{DNI}} \cdot f_p(\gamma) \cdot I_{\text{DN}}$$
+
+> **注意（2026-06-14）：** 直接辐射项现已使用 $f_{\text{DNI}}$ 替代 $f_{\text{exp}}$。$f_{\text{DNI}}$ 通过 ObstacleSet 和 HumanExposureModel 中的精细化计算获得（见第 2 节）。
 
 ### 1.3 统一入口
 
@@ -103,11 +109,14 @@ $$I_{\text{direct}} = f_{\text{exp}} \cdot f_p(\gamma) \cdot I_{\text{DN}}$$
 
 ## 2. 人体暴露因子与视角系数模型（HumanExposureModel.cs）
 
-### 2.1 太阳暴露因子计算
+### 2.1 太阳暴露因子计算（增强版，2026-06-14）
 
-使用反向光线追踪计算人体被太阳直接照射的比例 $f_{\text{exp}} \in [0, 1]$。
+使用反向光线追踪计算人体被太阳直接照射的比例。本模块提供两种暴露因子：
 
-**算法流程：**
+- **$f_{\text{exp}}$（传统暴露因子）：** 二值判断，仅确定采样点是否被遮挡（0 或 1）
+- **$f_{\text{DNI}}$（有效 DNI 暴露因子）：** 综合暴露与透射效应，支持三种障碍物类型的差异化处理
+
+**传统暴露因子算法（向后兼容）：**
 
 1. 沿人体高度方向均匀布置 $N$ 个采样点（默认 $N=3$，从地面到全身高度）
 2. 对每个采样点，沿太阳方向发射射线
@@ -115,6 +124,40 @@ $$I_{\text{direct}} = f_{\text{exp}} \cdot f_p(\gamma) \cdot I_{\text{DN}}$$
 4. 暴露因子 = 未被遮挡的采样点数 / 总采样点数
 
 $$f_{\text{exp}} = \frac{N_{\text{exposed}}}{N_{\text{total}}}$$
+
+**有效 DNI 暴露因子 $f_{\text{DNI}}$（增强版）：**
+
+对每个高度采样点沿太阳方向发射射线，根据击中障碍物的类型分别计算 DNI 贡献：
+
+| 击中类型 | DNI 贡献 | 物理含义 |
+|:---:|:---:|:---|
+| 无遮挡 | 1.0 | 全额直接辐射 |
+| 不透光物体 (Opaque) | 0.0 | 完全阻挡，其后方所有 Tree/Translucent 均处于阴影中 |
+| 树木细节模型 (Tree) | $\exp(-k \cdot \text{LAD} \cdot s)$ | Beer-Lambert 冠层透射（仅当射线路径无 Opaque 时） |
+| 半透明遮阳构件 (Translucent) | $\tau$ | 固定透射率透射（仅当射线路径无 Opaque 时） |
+
+有效 DNI 暴露因子为所有采样点 DNI 贡献的平均值：
+
+$$f_{\text{DNI}} = \frac{1}{N} \sum_{i=1}^{N} \text{DNI}_{\text{contrib},i}$$
+
+**物理逻辑修正（2026-06-14）：**
+
+光线从太阳射向地面（正向），代码使用反向光线追踪（从人体采样点向太阳方向发射射线）。关键物理约束：**不透光物体 (Opaque) 具有绝对遮挡优先权**——如果射线路径上存在任何不透光障碍物，其后面的树木或半透明遮阳构件均处于建筑阴影中，不应再计算 DNI 透射。
+
+判断逻辑（修正后）：
+1. 先检测所有 Opaque Mesh——**有任何交点立即返回 Opaque**（DNI = 0）
+2. 无 Opaque 交点时，在所有 Tree/Translucent Mesh 中找**从人体方向最远**的交点（等价于从太阳方向第一个遇到的障碍物）
+3. 若射线同时与多类非 Opaque 障碍物相交，以从太阳方向最近的障碍物类型为准
+
+**Beer-Lambert 冠层透射方程：**
+
+$$I_{\text{transmitted}} = I_{\text{DN}} \cdot \exp(-k \cdot \text{LAD} \cdot s)$$
+
+其中：
+- $s$：光线穿过树木冠层的几何路径长度 [m]，通过射线与简化冠层模型的进出交点计算
+- $k$：太阳辐射消光系数 [-]，默认 0.65，典型范围 0.5–0.8（阔叶）、0.3–0.5（针叶）
+- $\text{LAD}$：叶面积密度 [m²/m³]，默认 1.0，典型范围 0.5–8.0
+- $\tau$：遮阳构件直接太阳辐射透射率 [-]，默认 0.05
 
 **参数：**
 
@@ -126,9 +169,26 @@ $$f_{\text{exp}} = \frac{N_{\text{exposed}}}{N_{\text{total}}}$$
 | maxRayDistance | m | 500.0 | 最大射线追踪距离 |
 | rayOffset | m | 0 | 射线起点偏移 |
 
-### 2.2 全4π球面视角系数分解
+**植被冠层路径长度计算：**
 
-将人体周围的全空间（4π球面）分解为三个部分，满足守恒条件：
+使用 `CalculateCanopyPathLength` 方法，通过 `MeshLine` 射线与树木简化冠层模型求交，获取所有进出交点参数，计算几何路径长度：
+
+$$s = t_{\text{exit}} - t_{\text{entry}}$$
+
+其中 $t_{\text{entry}}$ 为射线进入冠层的第一个有效交点参数，$t_{\text{exit}}$ 为离开冠层的最后一个有效交点参数。
+
+**新增核心方法：**
+
+| 方法 | 功能 |
+|:---|:---|
+| `ClassifyRayHit()` | 射线击中分类：Opaque 绝对优先，非 Opaque 取最远交点 |
+| `CalculateCanopyPathLength()` | 计算光线穿过冠层的几何路径长度 $s$ |
+| `CalculateDNIExposureFactor()` | 单点有效 DNI 暴露因子计算 |
+| `CalculateDNIExposureFactorsBatch()` | 批量有效 DNI 暴露因子计算（并行） |
+
+### 2.2 全 4π 球面视角系数分解
+
+将人体周围的全空间（4π 球面）分解为三个部分，满足守恒条件：
 
 $$F_{\text{SVF}} + F_{\text{GVF}} + F_{\text{OVF}} = 1.0$$
 
@@ -161,29 +221,29 @@ $$z_i = \sqrt{1 - \frac{i}{N}}, \quad i = 0, 1, \ldots, N-1$$
 
 ---
 
-## 3. MRT Grasshopper 组件（MRTcalculator.cs）
+## 3. MRT Calculator 组件（MRTcalculator.cs）
 
 ### 3.1 输入参数
 
 | 索引 | 参数 | 类型 | 说明 |
 |:---:|:---:|:---:|:---|
-| 0 | EPW File | Text | EPW气象文件路径 |
-| 1 | Analysis Points | Point3d List | 地面分析点（必须位于地表Z=0，非气象高度） |
-| 2 | Obstacles | Brep List | 障碍物/环境几何体（可选） |
-| 3 | MRT Settings | Generic | MRT配置设置（可选，默认新建设置） |
-| 4 | Time Settings | Generic | 模拟时间段（可选，默认全年8760h） |
-| 5 | Air Temperature (Ta) | Number Tree | 空气温度 [°C]，支持4种输入模式（可选） |
-| 6 | Ground Temperature (Tg) | Number Tree | 地面温度 [°C]，支持4种输入模式（可选） |
+| 0 | EPW File | Text | EPW 气象文件路径 |
+| 1 | Analysis Points | Point3d List | 地面分析点（必须位于地表 Z=0，非气象高度） |
+| 2 | Obstacle Set | Generic | **增强版（2026-06-14）**：分类障碍物设置集（ObstacleSet）。连接 ObsSet 组件。支持不透光建筑、树木冠层透射（Beer-Lambert）、半透明遮阳。向后兼容：可接受 List<Brep> 或 List<Mesh> 作为不透光障碍物（可选） |
+| 3 | MRT Settings | Generic | MRT 配置设置（可选，默认新建设置） |
+| 4 | Time Settings | Generic | 模拟时间段（可选，默认全年 8760h） |
+| 5 | Air Temperature (Ta) | Number Tree | 空气温度 [°C]，支持 4 种输入模式（可选） |
+| 6 | Ground Temperature (Tg) | Number Tree | 地面温度 [°C]，支持 4 种输入模式（可选） |
 | 7 | Surrounding Surface Temp (Tsur) | Number List | 周围障碍物表面温度 [°C]（可选） |
-| 8 | Run | Boolean | 设置为true执行模拟 |
+| 8 | Run | Boolean | 设置为 true 执行模拟 |
 
 **Ta/Tg 输入模式：**
 
 | 模式 | 数据量 | 说明 |
 |:---:|:---:|:---|
-| 1 | 1个值 | 统一固定温度，所有时刻所有点 |
-| 2 | N个值（N=点数） | 逐点固定温度 |
-| 3 | 8760个值 | 逐时变化温度（所有点共享） |
+| 1 | 1 个值 | 统一固定温度，所有时刻所有点 |
+| 2 | N 个值（N=点数） | 逐点固定温度 |
+| 3 | 8760 个值 | 逐时变化温度（所有点共享） |
 | 4 | N×8760 Tree | 逐点逐时变化温度 |
 
 ### 3.2 输出参数
@@ -191,17 +251,18 @@ $$z_i = \sqrt{1 - \frac{i}{N}}, \quad i = 0, 1, \ldots, N-1$$
 | 索引 | 参数 | 说明 |
 |:---:|:---:|:---|
 | 0 | MRT | 平均辐射温度 [°C]，每点每时 |
-| 1 | SVF | 天空视角系数 [0–1]，全4π采样 |
-| 2 | GVF | 地面视角系数 [0–1]，全4π采样 |
-| 3 | OVF | 障碍物视角系数 [0–1]，全4π采样 |
-| 4 | Exp | 太阳暴露因子 [0–1]，每点每时 |
-| 5 | dT_sw | 短波辐射引起的MRT增量 [°C] |
-| 6 | dT_lw | 长波辐射总MRT增量 [°C] |
-| 7 | dT_lw_sky | 天空长波分量贡献 [°C] |
-| 8 | dT_lw_grd | 地面长波分量贡献 [°C] |
-| 9 | dT_lw_obs | 障碍物长波分量贡献 [°C] |
-| 10 | HrMRT | 所有点逐时平均MRT [°C] |
-| 11 | SunVec | 每个分析时刻的太阳向量 |
+| 1 | SVF | 天空视角系数 [0–1]，全 4π 采样 |
+| 2 | GVF | 地面视角系数 [0–1]，全 4π 采样 |
+| 3 | OVF | 障碍物视角系数 [0–1]，全 4π 采样 |
+| 4 | Exp | 太阳暴露因子 $f_{\text{exp}}$ [0–1]，每点每时（二值：暴露/遮挡） |
+| 5 | **DNIExp** | **新增**：有效 DNI 暴露因子 $f_{\text{DNI}}$ [0–1]，综合暴露与透射 |
+| 6 | dT_sw | 短波辐射引起的 MRT 增量 [°C] |
+| 7 | dT_lw | 长波辐射总 MRT 增量 [°C] |
+| 8 | dT_lw_sky | 天空长波分量贡献 [°C] |
+| 9 | dT_lw_grd | 地面长波分量贡献 [°C] |
+| 10 | dT_lw_obs | 障碍物长波分量贡献 [°C] |
+| 11 | HrMRT | 所有点逐时平均 MRT [°C] |
+| 12 | SunVec | 每个分析时刻的太阳向量 |
 
 ---
 
@@ -211,7 +272,7 @@ $$z_i = \sqrt{1 - \frac{i}{N}}, \quad i = 0, 1, \ldots, N-1$$
 
 | 参数 | 标识 | 单位 | 默认值 | 说明 |
 |:---:|:---:|:---:|:---:|:---|
-| Use RayMan | RayMan | - | false | 使用RayMan模型替代SolarCal |
+| Use RayMan | RayMan | - | false | 使用 RayMan 模型替代 SolarCal |
 | Posture | Post | - | 0 | 人体姿态：0=站立(f=0.725)，1=坐姿(f=0.696) |
 | Body Absorptivity | Alpha | - | 0.7 | 短波吸收率 |
 | Body Emissivity | Epsilon | - | 0.95 | 长波发射率 |
@@ -221,14 +282,62 @@ $$z_i = \sqrt{1 - \frac{i}{N}}, \quad i = 0, 1, \ldots, N-1$$
 | Eye Height for SVF | HSVF | m | 1.5 | 视角系数计算眼高度 |
 | Body Height | HBod | m | 1.7 | 人体总高度 |
 | Sky Emissivity | SkyEps | - | -1 | 天空发射率，-1=自动（露点计算） |
-| SVF Sample Count | SVF_N | - | 1000 | 全4π球面采样数 |
+| SVF Sample Count | SVF_N | - | 1000 | 全 4π 球面采样数 |
 | Longwave Coeff | LwCoeff | - | 0.5 | 长波线性化系数 |
-| Ground Emissivity | EpsGrd | - | 0.95 | 地面长波发射率（仅RayMan使用） |
-| Obstacle Emissivity | EpsObs | - | 0.95 | 障碍物长波发射率（仅RayMan使用） |
+| Ground Emissivity | EpsGrd | - | 0.95 | 地面长波发射率（仅 RayMan 使用） |
+| Obstacle Emissivity | EpsObs | - | 0.95 | 障碍物长波发射率（仅 RayMan 使用） |
 
 ---
 
-## 5. 参考文献
+## 5. 障碍物设置组件（ObsSetSettings.cs）
+
+### 5.1 功能说明
+
+ObsSet 组件用于创建分类障碍物设置集（`ObstacleSet`），替代 MRT 组件和 GroundSet 组件原有的平面 Brep 列表输入。通过将障碍物分类为不透光物体、树木（含冠层透射）和半透明遮阳构件，实现精细化的直接辐射（DNI）计算。
+
+**核心原理：**
+- 当反向光线追踪的采样点被遮挡时，传统方法直接忽略该点的 DNI 贡献（$f_{\text{exp}}=0$ → DNI=0）
+- 增强版方法根据障碍物类型，通过 Beer-Lambert 定律或固定透射率计算 DNI 的部分透射
+- 有效 DNI 暴露因子 $f_{\text{DNI}}$ 综合暴露与透射效应，替代原 $f_{\text{exp}}$ 用于直接辐射计算
+
+### 5.2 输入参数
+
+| 索引 | 参数 | 标识 | 类型 | 默认值 | 说明 |
+|:---:|:---:|:---:|:---:|:---:|:---|
+| 0 | Tree Detail | TreeDet | Mesh List | — | 树的细节模型（树叶、枝干），来自 Tree Processor 组件 |
+| 1 | Tree Canopy | TreeCan | Mesh List | — | 树木简化冠层模型，用于计算光线穿过冠层的几何路径长度 |
+| 2 | Leaf Area Density | LAD | Number | 1.0 | 叶面积密度 [m²/m³]，表示单位冠层体积的叶面积 |
+| 3 | Extinction Coeff | k | Number | 0.65 | 太阳辐射消光系数 [-]，Beer-Lambert 定律参数，典型范围 0.5–0.8 |
+| 4 | Translucent Shade | TransShd | Mesh List | — | 半透明遮阳构件（穿孔金属板、织物等） |
+| 5 | Transmittance | Tau | Number | 0.05 | 遮阳构件直接太阳辐射透射率 [-]，范围 0.0–1.0 |
+| 6 | Opaque Objects | Opaque | Mesh List | — | 不透光物体（建筑、围墙等），完全阻挡直接辐射 |
+
+**典型透射率参考值：**
+
+| 材料类型 | 透射率范围 |
+|:---:|:---:|
+| 穿孔金属板 | 0.05–0.15 |
+| 遮阳织物 | 0.02–0.30 |
+| 聚碳酸酯板 (PC) | 0.60–0.85 |
+| 玻璃 | 0.70–0.90 |
+
+### 5.3 输出参数
+
+| 索引 | 参数 | 说明 |
+|:---:|:---:|:---|
+| 0 | ObsSet | 分类障碍物设置集，连接至 MRT 组件的 Obstacle Set 输入端或 GroundSet 的 ObsSet 输入端 |
+
+### 5.4 使用注意事项
+
+1. **Tree Detail vs Tree Canopy**：Tree Detail 用于射线击中检测（判断点是否在树荫下），Tree Canopy 用于路径长度计算（光线穿过冠层的距离）。两者缺一不可，若提供了 Tree Detail 但未提供 Tree Canopy，组件会发出警告，且 DNI 透射将使用零路径长度。
+
+2. **向后兼容**：MRT 组件和 GroundSet 组件的 Obstacle Set 输入端向后兼容，仍可接受 List<Brep> 或 List<Mesh> 作为输入（自动归类为 Opaque 不透光物体）。
+
+3. **Mesh 输入**：支持直接输入 Mesh 类型。若输入 Surface 或 Brep 类型，Grasshopper 可隐式转换为 Mesh。
+
+---
+
+## 6. 参考文献
 
 1. ASHRAE Standard 55-2017: Thermal Environmental Conditions for Human Occupancy. American Society of Heating, Refrigerating and Air-Conditioning Engineers, Atlanta, GA, 2017.
 

@@ -13,7 +13,9 @@ The soil thermal physics module simulates hourly ground surface temperature and 
 
 The module provides two simulators:
 - **SoilThermalSimulator** (`SoilSim`): Single-point simulation
-- **SpatialSoilThermalSimulator** (`SpSoilSim`): Multi-point spatial simulation with per-point radiation correction (SVF, solar exposure, surrounding reflectance/emissivity)
+- **SpatialSoilThermalSimulator** (`SpSoilSim`): Multi-point spatial simulation with per-point radiation correction (SVF, fine-grained DNI exposure factor, surrounding reflectance/emissivity)
+
+**Enhanced (2026-06-14):** The spatial simulator introduces fine-grained Direct Normal Irradiance (DNI) exposure factor calculation, replacing the original binary exposure factor $f_{\text{exp}}$. Through the classified Obstacle Set (ObstacleSet), it supports differentiated transmission through three obstacle types: opaque objects (full block), trees (Beer-Lambert canopy transmission), and translucent sunshades (fixed transmittance), achieving more accurate shortwave radiation calculation.
 
 ---
 
@@ -23,41 +25,41 @@ The module provides two simulators:
 
 The ground surface temperature $T_1$ (top layer) is updated via the Force-Restore equation:
 
-$$\frac{dT_1}{dt} = C_{flux} \cdot G - C_{restore} \cdot (T_1 - T_2)$$
+$$\frac{dT_1}{dt} = C_{\text{flux}} \cdot G - C_{\text{restore}} \cdot (T_1 - T_2)$$
 
 In discrete form (sub-step iteration):
 
-$$T_1^{new} = T_1^{prev} + \Delta t \cdot \left[ C_{flux} \cdot G - C_{restore} \cdot (T_1^{guess} - T_2^{prev}) \right]$$
+$$T_1^{\text{new}} = T_1^{\text{prev}} + \Delta t \cdot \left[ C_{\text{flux}} \cdot G - C_{\text{restore}} \cdot (T_1^{\text{guess}} - T_2^{\text{prev}}) \right]$$
 
 | Parameter | Symbol | Unit | Description |
 |-----------|--------|------|-------------|
 | Top layer temperature | $T_1$ | $^{\circ}\mathrm{C}$ | Ground surface temperature (state variable) |
 | Deep layer temperature | $T_2$ | $^{\circ}\mathrm{C}$ | Deep soil temperature (state variable) |
 | Ground heat flux | $G$ | $\mathrm{W/m^2}$ | Net heat flux into the soil |
-| Time step | $\Delta t$ | $\mathrm{s}$ | Sub-step duration $= 3600 / N_{sub} / N_{hourly}$ |
-| Sub-steps per hour | $N_{sub}$ | -- | Default 10, range [1, 60] |
+| Time step | $\Delta t$ | $\mathrm{s}$ | Sub-step duration $= 3600 / N_{\text{sub}} / N_{\text{hourly}}$ |
+| Sub-steps per hour | $N_{\text{sub}}$ | -- | Default 10, range [1, 60] |
 
 ### 2.2 Deep Layer Temperature Update
 
-$$\frac{dT_2}{dt} = C_{flux2} \cdot G + C_{deep} \cdot (T_1 - T_2)$$
+$$\frac{dT_2}{dt} = C_{\text{flux2}} \cdot G + C_{\text{deep}} \cdot (T_1 - T_2)$$
 
 Discrete form:
 
-$$T_2^{new} = T_2^{prev} + \Delta t \cdot \left[ C_{flux2} \cdot G_{stored} + C_{deep} \cdot (T_1 - T_2^{prev}) \right]$$
+$$T_2^{\text{new}} = T_2^{\text{prev}} + \Delta t \cdot \left[ C_{\text{flux2}} \cdot G_{\text{stored}} + C_{\text{deep}} \cdot (T_1 - T_2^{\text{prev}}) \right]$$
 
 ### 2.3 Force-Restore Coefficients
 
 **Restoration coefficient** (Deardorff 1978; Noilhan & Planton 1989, Eq.24):
 
-$$C_{restore} = \frac{2\pi}{\tau_1}$$
+$$C_{\text{restore}} = \frac{2\pi}{\tau_1}$$
 
 **Deep layer restoration coefficient** (Noilhan & Planton 1989, Eq.25):
 
-$$C_{deep} = \frac{2\pi}{\tau_2}$$
+$$C_{\text{deep}} = \frac{2\pi}{\tau_2}$$
 
 **Flux coefficients**:
 
-$$C_{flux} = \frac{2}{\rho C \cdot d_1}, \qquad C_{flux2} = \frac{1}{\rho C \cdot d_2}$$
+$$C_{\text{flux}} = \frac{2}{\rho C \cdot d_1}, \qquad C_{\text{flux2}} = \frac{1}{\rho C \cdot d_2}$$
 
 **Time constants**:
 
@@ -72,7 +74,7 @@ with clipping: $\tau_2 = \mathrm{clip}(\tau_2, \; \tau_1, \; 10\tau_1)$
 | Deep layer depth | $d_2$ | $\mathrm{m}$ | Thickness of deep soil layer | 0.5 | [0.001, 5.0] |
 | Diurnal time constant | $\tau_1$ | $\mathrm{s}$ | 24-hour period | 86400 | Fixed |
 
-> **Note:** $\rho C$ is converted to $\mathrm{J/(m^3 \cdot K)}$ internally: $\rho C_{SI} = \rho C \times 10^6$
+> **Note:** $\rho C$ is converted to $\mathrm{J/(m^3 \cdot K)}$ internally: $\rho C_{\text{SI}} = \rho C \times 10^6$
 
 ### 2.4 Soil Thermal Property Presets
 
@@ -102,41 +104,41 @@ $$R_n = H + LE + G$$
 
 ### 3.2 Net Shortwave Radiation
 
-$$R_{n,sw} = (1 - \alpha) \cdot \frac{GHI_{raw}}{\max(0.01, \Delta t_{hours})}$$
+$$R_{n,\text{sw}} = (1 - \alpha) \cdot \frac{GHI_{\text{raw}}}{\max(0.01, \Delta t_{\text{hours}})}$$
 
 | Parameter | Symbol | Unit | Description |
 |-----------|--------|------|-------------|
-| Surface albedo | $\alpha$ | -- | Shortwave reflectance | 
-| Global horizontal irradiance | $GHI_{raw}$ | $\mathrm{Wh/m^2}$ | From EPW or override (hourly accumulated) |
+| Surface albedo | $\alpha$ | -- | Shortwave reflectance |
+| Global horizontal irradiance | $GHI_{\text{raw}}$ | $\mathrm{Wh/m^2}$ | From EPW or override (hourly accumulated) |
 | Time step factor | -- | -- | Converts hourly accumulation to instantaneous rate |
 
-> **Note:** The $GHI_{raw}$ value from EPW represents accumulation over the previous hour. The `timeStepFactor` $= 1 / \max(0.01, \Delta t_{hours})$ converts this to an average rate.
+> **Note:** The $GHI_{\text{raw}}$ value from EPW represents accumulation over the previous hour. The `timeStepFactor` $= 1 / \max(0.01, \Delta t_{\text{hours}})$ converts this to an average rate.
 
 ### 3.3 Net Longwave Radiation
 
-$$R_{n,lw} = \varepsilon_s \cdot (L_{\downarrow} - \sigma T_{g,K}^4)$$
+$$R_{n,\text{lw}} = \varepsilon_s \cdot (L_{\downarrow} - \sigma T_{g,\text{K}}^4)$$
 
-$$R_n = R_{n,sw} + R_{n,lw}$$
+$$R_n = R_{n,\text{sw}} + R_{n,\text{lw}}$$
 
 | Parameter | Symbol | Unit | Description | Default |
 |-----------|--------|------|-------------|---------|
 | Surface emissivity | $\varepsilon_s$ | -- | Longwave emissivity of ground | 0.95 |
 | Downward longwave | $L_{\downarrow}$ | $\mathrm{W/m^2}$ | From EPW HIR or override | EPW |
 | Stefan-Boltzmann constant | $\sigma$ | $\mathrm{W/(m^2 \cdot K^4)}$ | $5.67 \times 10^{-8}$ | Fixed |
-| Ground temperature (K) | $T_{g,K}$ | $\mathrm{K}$ | $T_g + 273.15$ | -- |
+| Ground temperature (K) | $T_{g,\text{K}}$ | $\mathrm{K}$ | $T_g + 273.15$ | -- |
 
 ### 3.4 Sensible Heat Flux
 
-$$H = \rho C_p \cdot \frac{T_g - T_{air}}{r_a}$$
+$$H = \rho C_p \cdot \frac{T_g - T_{\text{air}}}{r_a}$$
 
-$$\rho C_p = \rho_{air} \cdot 1004$$
+$$\rho C_p = \rho_{\text{air}} \cdot 1004$$
 
 | Parameter | Symbol | Unit | Description |
 |-----------|--------|------|-------------|
-| Air density | $\rho_{air}$ | $\mathrm{kg/m^3}$ | Computed from ideal gas law (see Section 7) |
+| Air density | $\rho_{\text{air}}$ | $\mathrm{kg/m^3}$ | Computed from ideal gas law (see Section 7) |
 | Specific heat of air | $C_p$ | $\mathrm{J/(kg \cdot K)}$ | 1004 (dry air at constant pressure) |
 | Ground temperature | $T_g$ | $^{\circ}\mathrm{C}$ | $T_1$ from Force-Restore |
-| Air temperature | $T_{air}$ | $^{\circ}\mathrm{C}$ | EPW dry bulb or user override |
+| Air temperature | $T_{\text{air}}$ | $^{\circ}\mathrm{C}$ | EPW dry bulb or user override |
 | Aerodynamic resistance | $r_a$ | $\mathrm{s/m}$ | Computed from log-law (see Section 8) |
 
 ---
@@ -153,9 +155,9 @@ $$LE = \frac{\Delta \cdot (R_n - G) + \rho C_p \cdot VPD / r_a}{\Delta + \gamma 
 
 **Iterative coupling with G:** Since $G = R_n - H - LE$, $G$ appears on both sides. The model iterates (max 5 iterations with relaxation factor 0.5):
 
-$$G^{new} = R_n - H - LE^{(k)}, \qquad G^{(k+1)} = 0.5 \cdot G^{(k)} + 0.5 \cdot G^{new}$$
+$$G^{\text{new}} = R_n - H - LE^{(k)}, \qquad G^{(k+1)} = 0.5 \cdot G^{(k)} + 0.5 \cdot G^{\text{new}}$$
 
-Convergence criterion: $|G^{new} - G^{(k)}| < 1.0 \; \mathrm{W/m^2}$
+Convergence criterion: $|G^{\text{new}} - G^{(k)}| < 1.0 \; \mathrm{W/m^2}$
 
 | Parameter | Symbol | Unit | Description | Source |
 |-----------|--------|------|-------------|--------|
@@ -166,25 +168,25 @@ Convergence criterion: $|G^{new} - G^{(k)}| < 1.0 \; \mathrm{W/m^2}$
 
 **LE clipping and energy redistribution:**
 
-When $LE$ exceeds the physical upper bound $LE_{max}$ (default 1000 W/m$^2$):
+When $LE$ exceeds the physical upper bound $LE_{\text{max}}$ (default 1000 W/m$^2$):
 
-$$LE_{clipped} = \mathrm{clip}(LE, \; 0, \; LE_{max})$$
+$$LE_{\text{clipped}} = \mathrm{clip}(LE, \; 0, \; LE_{\text{max}})$$
 
-$$LE_{excess} = LE - LE_{clipped}$$
+$$LE_{\text{excess}} = LE - LE_{\text{clipped}}$$
 
 The excess energy is redistributed (60% to G, 40% to H) to maintain energy balance:
 
-$$G_{final} = G + 0.6 \cdot LE_{excess}, \qquad H_{final} = H + 0.4 \cdot LE_{excess}$$
+$$G_{\text{final}} = G + 0.6 \cdot LE_{\text{excess}}, \qquad H_{\text{final}} = H + 0.4 \cdot LE_{\text{excess}}$$
 
 ### 4.2 Method 2: Simplified (Backward Compatible)
 
-$$LE = \beta_{moist} \cdot \frac{\rho_{air} C_p}{\gamma} \cdot \frac{VPD}{r_a}$$
+$$LE = \beta_{\text{moist}} \cdot \frac{\rho_{\text{air}} C_p}{\gamma} \cdot \frac{VPD}{r_a}$$
 
 with lower bound on $r_a$: $r_a \geq 10 \; \mathrm{s/m}$
 
 | Parameter | Symbol | Unit | Default | Range |
 |-----------|--------|------|---------|-------|
-| Moisture availability | $\beta_{moist}$ | -- | 0.3 | [0, 1] |
+| Moisture availability | $\beta_{\text{moist}}$ | -- | 0.3 | [0, 1] |
 
 ### 4.3 Method 3: No Latent Heat
 
@@ -213,11 +215,11 @@ $$\Delta(T) = \frac{4098 \cdot e_s(T)}{(T + 237.3)^2}$$
 
 From relative humidity:
 
-$$e_a = e_s(T_{air}) \cdot \frac{RH}{100}$$
+$$e_a = e_s(T_{\text{air}}) \cdot \frac{RH}{100}$$
 
 From RH override (when user provides custom RH):
 
-$$e_a = e_s(T_{air}^{override}) \cdot \frac{RH^{override}}{100}$$
+$$e_a = e_s(T_{\text{air}}^{\text{override}}) \cdot \frac{RH^{\text{override}}}{100}$$
 
 | Parameter | Symbol | Unit | Description | Source |
 |-----------|--------|------|-------------|--------|
@@ -241,13 +243,13 @@ $$\lambda(T) = 2.501 \times 10^6 - 2361 \cdot T$$
 
 ### 6.1 Air Density (Ideal Gas Law)
 
-$$\rho_{air} = \frac{P_a \times 1000}{R_d \cdot (T_{air} + 273.15)}$$
+$$\rho_{\text{air}} = \frac{P_a \times 1000}{R_d \cdot (T_{\text{air}} + 273.15)}$$
 
 | Parameter | Symbol | Unit | Value | Description |
 |-----------|--------|------|-------|-------------|
 | Atmospheric pressure | $P_a$ | $\mathrm{kPa}$ | EPW or 101.325 | Station pressure |
 | Gas constant for dry air | $R_d$ | $\mathrm{J/(kg \cdot K)}$ | 287.05 | Fixed |
-| Air temperature | $T_{air}$ | $^{\circ}\mathrm{C}$ | EPW or override | -- |
+| Air temperature | $T_{\text{air}}$ | $^{\circ}\mathrm{C}$ | EPW or override | -- |
 
 ### 6.2 Psychrometric Constant
 
@@ -281,7 +283,7 @@ $$r_a = \frac{\ln(z/z_{0m}) \cdot \ln(z/z_{0h})}{k^2 \cdot u}$$
 
 ### 7.2 Richardson Number (Atmospheric Stability)
 
-$$Ri = \frac{g \cdot (T_g - T_{air}) \cdot z}{(T_{air} + 273.15) \cdot u^2}$$
+$$Ri = \frac{g \cdot (T_g - T_{\text{air}}) \cdot z}{(T_{\text{air}} + 273.15) \cdot u^2}$$
 
 | Parameter | Symbol | Unit | Value | Description |
 |-----------|--------|------|-------|-------------|
@@ -289,13 +291,13 @@ $$Ri = \frac{g \cdot (T_g - T_{air}) \cdot z}{(T_{air} + 273.15) \cdot u^2}$$
 
 ### 7.3 Louis (1979) Stability Correction
 
-$$f_{stab} = \begin{cases}
+$$f_{\text{stab}} = \begin{cases}
 \displaystyle\frac{1}{1 + c \cdot \sqrt{-Ri}} & Ri < 0 \quad \text{(unstable)} \\[12pt]
 1 + d \cdot Ri & Ri > 0 \quad \text{(stable)} \\[12pt]
 1 & Ri = 0 \quad \text{(neutral)}
 \end{cases}$$
 
-Corrected resistance: $r_a^{corr} = r_a \cdot f_{stab}$
+Corrected resistance: $r_a^{\text{corr}} = r_a \cdot f_{\text{stab}}$
 
 | Parameter | Symbol | Default | Description |
 |-----------|--------|---------|-------------|
@@ -304,12 +306,12 @@ Corrected resistance: $r_a^{corr} = r_a \cdot f_{stab}$
 
 ### 7.4 Resistance Clipping
 
-$$r_a = \mathrm{clip}(r_a, \; r_a^{min}, \; r_a^{max})$$
+$$r_a = \mathrm{clip}(r_a, \; r_a^{\text{min}}, \; r_a^{\text{max}})$$
 
 | Parameter | Symbol | Unit | Default | Range |
 |-----------|--------|------|---------|-------|
-| Minimum resistance | $r_a^{min}$ | $\mathrm{s/m}$ | 10 | [1, $r_a^{max}$-1] |
-| Maximum resistance | $r_a^{max}$ | $\mathrm{s/m}$ | 500 | [50, 5000] |
+| Minimum resistance | $r_a^{\text{min}}$ | $\mathrm{s/m}$ | 10 | [1, $r_a^{\text{max}}$-1] |
+| Maximum resistance | $r_a^{\text{max}}$ | $\mathrm{s/m}$ | 500 | [50, 5000] |
 
 ---
 
@@ -321,15 +323,15 @@ Four methods are available via `BetaMethod`:
 
 **Method 0: Noilhan & Planton (ISBA)**
 
-$$\beta = \frac{w_g}{w_{sat}}$$
+$$\beta = \frac{w_g}{w_{\text{sat}}}$$
 
 **Method 1: Direct (User-specified)**
 
-$$\beta = \beta_{direct}$$
+$$\beta = \beta_{\text{direct}}$$
 
 **Method 2: Kondo & Saigusa (1994)**
 
-$$\beta = \frac{1}{1 + \exp\left[-b \cdot \left(\frac{w_g}{w_{sat}} - a\right)\right]}$$
+$$\beta = \frac{1}{1 + \exp\left[-b \cdot \left(\frac{w_g}{w_{\text{sat}}} - a\right)\right]}$$
 
 | Texture Index | Soil Type | $a$ (threshold) | $b$ (steepness) |
 |:---:|:---:|:---:|:---:|
@@ -341,30 +343,30 @@ $$\beta = \frac{1}{1 + \exp\left[-b \cdot \left(\frac{w_g}{w_{sat}} - a\right)\r
 
 **Method 3: Power Law**
 
-$$\beta = \left(\frac{w_g}{w_{sat}}\right)^{b_{exp}}$$
+$$\beta = \left(\frac{w_g}{w_{\text{sat}}}\right)^{b_{\text{exp}}}$$
 
 | Parameter | Symbol | Unit | Default | Range | Description |
 |-----------|--------|------|---------|-------|-------------|
 | Surface soil moisture | $w_g$ | $\mathrm{m^3/m^3}$ | 0.25 | [0, 0.8] | Volumetric soil water content |
-| Field capacity | $w_{sat}$ | $\mathrm{m^3/m^3}$ | 0.35 | [0.01, 0.9] | Saturation/field capacity |
-| Beta exponent | $b_{exp}$ | -- | 1.0 | [0.1, 5.0] | Power law exponent |
-| Minimum beta | $\beta_{min}$ | -- | 0.05 | [0, 1] | Lower bound |
+| Field capacity | $w_{\text{sat}}$ | $\mathrm{m^3/m^3}$ | 0.35 | [0.01, 0.9] | Saturation/field capacity |
+| Beta exponent | $b_{\text{exp}}$ | -- | 1.0 | [0.1, 5.0] | Power law exponent |
+| Minimum beta | $\beta_{\text{min}}$ | -- | 0.05 | [0, 1] | Lower bound |
 
-Beta is always clipped: $\beta = \mathrm{clip}(\beta, \; \beta_{min}, \; 1.0)$
+Beta is always clipped: $\beta = \mathrm{clip}(\beta, \; \beta_{\text{min}}, \; 1.0)$
 
 ### 8.2 Soil Surface Resistance (ISBA Model)
 
-$$r_s = r_s^{min} \cdot \exp\left[a_{sens} \cdot (1 - \beta)\right]$$
+$$r_s = r_s^{\text{min}} \cdot \exp\left[a_{\text{sens}} \cdot (1 - \beta)\right]$$
 
 With boundary conditions:
-- When $\beta \geq 1.0$: $r_s = r_s^{min}$ (saturated, minimum resistance)
-- When $\beta \leq 0.01$: $r_s = r_s^{max}$ (dry, maximum resistance)
+- When $\beta \geq 1.0$: $r_s = r_s^{\text{min}}$ (saturated, minimum resistance)
+- When $\beta \leq 0.01$: $r_s = r_s^{\text{max}}$ (dry, maximum resistance)
 
 | Parameter | Symbol | Unit | Default | Range | Description |
 |-----------|--------|------|---------|-------|-------------|
-| Min soil resistance | $r_s^{min}$ | $\mathrm{s/m}$ | 50 | [10, 1000] | Wet soil surface resistance |
-| Max soil resistance | $r_s^{max}$ | $\mathrm{s/m}$ | 500 | [$r_s^{min}$+10, 10000] | Dry soil surface resistance |
-| Beta sensitivity | $a_{sens}$ | -- | 5.0 | -- | ISBA sensitivity index |
+| Min soil resistance | $r_s^{\text{min}}$ | $\mathrm{s/m}$ | 50 | [10, 1000] | Wet soil surface resistance |
+| Max soil resistance | $r_s^{\text{max}}$ | $\mathrm{s/m}$ | 500 | [$r_s^{\text{min}}$+10, 10000] | Dry soil surface resistance |
+| Beta sensitivity | $a_{\text{sens}}$ | -- | 5.0 | -- | ISBA sensitivity index |
 
 ---
 
@@ -374,38 +376,45 @@ With boundary conditions:
 
 Hourly evapotranspiration from latent heat flux:
 
-$$ET = \frac{LE}{\lambda(T_{air})} \times 3600 \quad [\mathrm{mm/h}]$$
+$$ET = \frac{LE}{\lambda(T_{\text{air}})} \times 3600 \quad [\mathrm{mm/h}]$$
 
 ### 9.2 Reference ET (FAO-56 Penman-Monteith for Grass)
 
 The reference ET calculation uses the FAO-56 standard parameters for a hypothetical grass reference surface ($h = 0.12$ m):
 
-$$ET_{ref} = \frac{1}{\lambda(T_{air})} \cdot \frac{\Delta \cdot (R_n - G) + \rho C_p \cdot VPD / r_a^{grass}}{\Delta + \gamma \cdot (1 + r_s^{grass} / r_a^{grass})} \times 3600 \quad [\mathrm{mm/h}]$$
+$$ET_{\text{ref}} = \frac{1}{\lambda(T_{\text{air}})} \cdot \frac{\Delta \cdot (R_n - G) + \rho C_p \cdot VPD / r_a^{\text{grass}}}{\Delta + \gamma \cdot (1 + r_s^{\text{grass}} / r_a^{\text{grass}})} \times 3600 \quad [\mathrm{mm/h}]$$
 
 With fixed reference parameters:
 
 | Parameter | Value | Description |
 |-----------|-------|-------------|
-| $r_a^{grass}$ | $208 / u$ | Grass aerodynamic resistance [s/m] |
-| $r_s^{grass}$ | 70 | Bulk surface resistance for grass [s/m] |
+| $r_a^{\text{grass}}$ | $208 / u$ | Grass aerodynamic resistance [s/m] |
+| $r_s^{\text{grass}}$ | 70 | Bulk surface resistance for grass [s/m] |
 
 ---
 
 ## 10. Spatial Radiation Correction (Spatial Simulator Only)
 
-The spatial simulator applies per-point radiation corrections using sky view factor (SVF), solar exposure factor, and surrounding surface properties.
+The spatial simulator applies per-point radiation corrections using sky view factor (SVF), effective DNI exposure factor, and surrounding surface properties.
 
 ### 10.1 Corrected Shortwave (GHI)
 
-$$GHI_{actual} = DHI \cdot SVF + DNI \cdot \sin(\alpha) \cdot f_{DNI} + \rho_{sur} \cdot GHI_{surround} \cdot (1 - SVF)$$
+$$GHI_{\text{actual}} = DHI \cdot SVF + DNI \cdot \sin(\alpha) \cdot f_{\text{DNI}} + \rho_{\text{sur}} \cdot GHI_{\text{surround}} \cdot (1 - SVF)$$
 
 where:
 
-$$GHI_{surround} = DHI + DNI \cdot \sin(\alpha)$$
+$$GHI_{\text{surround}} = DHI + DNI \cdot \sin(\alpha)$$
 
-**Effective DNI Exposure Factor $f_{DNI}$ (Enhanced, 2026-06-14):**
+**Effective DNI Exposure Factor $f_{\text{DNI}}$ (Enhanced, 2026-06-14):**
 
-Replaces the binary exposure factor $f_{exp}$ (shaded/unshaded only) with the effective DNI exposure factor $f_{DNI}$, supporting differentiated transmission through three obstacle types:
+Replaces the binary exposure factor $f_{\text{exp}}$ (shaded/unshaded only) with the effective DNI exposure factor $f_{\text{DNI}}$, supporting differentiated transmission through three obstacle types.
+
+**Physical Logic Correction (2026-06-14):** Light travels from the sun toward the ground (forward direction). The code uses backward ray tracing (casting rays from the ground sample point toward the sun). The critical physical constraint is: **Opaque objects have absolute blocking priority** — if any opaque obstacle exists on the ray path, all tree or translucent sunshade obstacles behind it are in the building's shadow and must NOT contribute to DNI transmission.
+
+Decision logic (corrected):
+1. **Any opaque object on the ray path** → DNI = 0 (fully blocked)
+2. No opaque → find the **nearest from the sun direction** Tree/Translucent obstacle
+3. No obstacles at all → full DNI
 
 | Hit Type | DNI Contribution | Physical Meaning |
 |:---:|:---:|:---|
@@ -414,34 +423,43 @@ Replaces the binary exposure factor $f_{exp}$ (shaded/unshaded only) with the ef
 | Tree detail mesh | $\exp(-k \cdot \text{LAD} \cdot s)$ | Beer-Lambert canopy transmission (only when no Opaque on ray path) |
 | Translucent sunshade | $\tau$ | Fixed transmittance (only when no Opaque on ray path) |
 
-Decision logic:
-1. **Any opaque object on the ray path** → DNI = 0 (fully blocked)
-2. No opaque → find the **nearest from the sun direction** Tree/Translucent obstacle
-3. No obstacles at all → full DNI
-
 Vegetation canopy transmission equation (Beer-Lambert law):
 
 $$I_{\text{transmitted}} = I_{\text{DN}} \cdot \exp(-k \cdot \text{LAD} \cdot s)$$
 
-Where $s$ is the geometric path length through the tree canopy [m], $k$ is the extinction coefficient, $\text{LAD}$ is leaf area density [m²/m³], and $\tau$ is the sunshade direct solar transmittance.
+Where:
+- $s$: Geometric path length through the tree canopy [m], computed by `CalculateCanopyPathLength` (entry-to-exit intersection distance with the simplified canopy mesh)
+- $k$: Extinction coefficient [-], default 0.65, typical range 0.5–0.8 (broadleaf), 0.3–0.5 (conifer)
+- $\text{LAD}$: Leaf area density [m²/m³], default 1.0, typical range 0.5–8.0
+- $\tau$: Sunshade direct solar transmittance [-], default 0.05
+
+**Computation Pipeline (SpatialSoilThermalSimulator.cs):**
+
+1. Read classified obstacle set from `GroundSurfaceConfig.ObstacleSet`
+2. Call `GetAllMeshes()` to obtain all meshes for SVF calculation
+3. For each time step and each ground point, call `CalculateDNIExposureFactorsBatch()` to compute $f_{\text{DNI}}$
+4. Substitute $f_{\text{DNI}}$ into the shortwave radiation correction formula to compute $GHI_{\text{actual}}$
+5. The corrected $GHI_{\text{actual}}$ drives the Force-Restore + Penman-Monteith simulation
+
+**Backward Compatibility:** When the ObsSet component is not connected (no obstacle classification), the traditional `CalculateExposureFactorsBatch()` method is used, with $f_{\text{DNI}} = f_{\text{exp}}$.
 
 ### 10.2 Corrected Longwave
 
-$$L_{\downarrow}^{actual} = L_{sky} \cdot SVF + \varepsilon_{sur} \cdot \sigma \cdot T_{sur,K}^4 \cdot (1 - SVF)$$
+$$L_{\downarrow}^{\text{actual}} = L_{\text{sky}} \cdot SVF + \varepsilon_{\text{sur}} \cdot \sigma \cdot T_{\text{sur,K}}^4 \cdot (1 - SVF)$$
 
 where:
 
-$$L_{sky} = HIR_{EPW} \cdot SVF$$
+$$L_{\text{sky}} = HIR_{\text{EPW}} \cdot SVF$$
 
 | Parameter | Symbol | Unit | Default | Description |
 |-----------|--------|------|---------|-------------|
 | Sky View Factor | $SVF$ | -- | 1.0 (no obstacles) | [0, 1]; fraction of sky hemisphere visible |
-| Effective DNI exposure factor | $f_{DNI}$ | -- | -- | [0, 1]; DNI effective factor combining exposure and transmission |
-| Solar exposure factor | $f_{exp}$ | -- | -- | [0, 1]; binary: fraction of direct sun unobstructed (legacy) |
+| Effective DNI exposure factor | $f_{\text{DNI}}$ | -- | -- | [0, 1]; DNI effective factor combining exposure and transmission |
+| Solar exposure factor | $f_{\text{exp}}$ | -- | -- | [0, 1]; binary: fraction of direct sun unobstructed (legacy) |
 | Solar altitude | $\alpha$ | rad | -- | From SPA solar position |
-| Surround reflectance | $\rho_{sur}$ | -- | 0.2 | Shortwave reflectance of surrounding surfaces |
-| Surround emissivity | $\varepsilon_{sur}$ | -- | 0.95 | Longwave emissivity of surrounding surfaces |
-| Surround temperature | $T_{sur}$ | $^{\circ}\mathrm{C}$ | $T_{air}$ | Surrounding surface temperature (user override or EPW air temp) |
+| Surround reflectance | $\rho_{\text{sur}}$ | -- | 0.2 | Shortwave reflectance of surrounding surfaces |
+| Surround emissivity | $\varepsilon_{\text{sur}}$ | -- | 0.95 | Longwave emissivity of surrounding surfaces |
+| Surround temperature | $T_{\text{sur}}$ | $^{\circ}\mathrm{C}$ | $T_{\text{air}}$ | Surrounding surface temperature (user override or EPW air temp) |
 
 ---
 
@@ -508,13 +526,13 @@ $$L_{sky} = HIR_{EPW} \cdot SVF$$
 
 ## 12. Physical Consistency Between Temperature and Humidity
 
-When overriding air temperature without adjusting relative humidity, the physical consistency between temperature ($T_{air}$), relative humidity ($RH$), and actual vapor pressure ($e_a$) can be violated because:
+When overriding air temperature without adjusting relative humidity, the physical consistency between temperature ($T_{\text{air}}$), relative humidity ($RH$), and actual vapor pressure ($e_a$) can be violated because:
 
-$$e_a = e_s(T_{air}) \cdot \frac{RH}{100}$$
+$$e_a = e_s(T_{\text{air}}) \cdot \frac{RH}{100}$$
 
-If $T_{air}$ changes but $RH$ stays fixed, $e_a$ changes non-physically. To maintain consistency, provide a custom `RH` input (port 8 on Soil Thermal Settings) whenever `AirTemp` is overridden:
+If $T_{\text{air}}$ changes but $RH$ stays fixed, $e_a$ changes non-physically. To maintain consistency, provide a custom `RH` input (port 8 on Soil Thermal Settings) whenever `AirTemp` is overridden:
 
-$$RH^{new} = \frac{e_s(T_{air}^{original})}{e_s(T_{air}^{override})} \cdot RH^{original} \cdot 100 \quad \text{(to preserve } e_a \text{)}$$
+$$RH^{\text{new}} = \frac{e_s(T_{\text{air}}^{\text{original}})}{e_s(T_{\text{air}}^{\text{override}})} \cdot RH^{\text{original}} \cdot 100 \quad \text{(to preserve } e_a \text{)}$$
 
 The `RH` input supports the same multi-mode structure as `AirTemp`: single value, per-point constant, time series, or per-point time series.
 
@@ -535,7 +553,7 @@ The `RH` input supports the same multi-mode structure as `AirTemp`: single value
 
 ### 13.2 State Variable Initialization
 
-$$T_1^{init} = T_{air}^{first} \; \text{or} \; T_{user}^{surf}, \qquad T_2^{init} = T_{mean}^{annual} \; \text{or} \; T_{air}^{first}$$
+$$T_1^{\text{init}} = T_{\text{air}}^{\text{first}} \; \text{or} \; T_{\text{user}}^{\text{surf}}, \qquad T_2^{\text{init}} = T_{\text{mean}}^{\text{annual}} \; \text{or} \; T_{\text{air}}^{\text{first}}$$
 
 ---
 
@@ -554,6 +572,3 @@ $$T_1^{init} = T_{air}^{first} \; \text{or} \; T_{user}^{surf}, \qquad T_2^{init
 6. **Tetens, O.** (1930). Uber einige meteorologische Begriffe. *Z. Geophys.*, 6, 297-309.
 
 7. **Reda, I. & Andreas, A.** (2004). Solar Position Algorithm for Solar Radiation Applications. *Solar Energy*, 76(5), 577-589. https://doi.org/10.1016/j.solener.2003.12.003
-
----
-

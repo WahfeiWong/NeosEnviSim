@@ -13,7 +13,9 @@
 
 本模块提供两个模拟器：
 - **SoilThermalSimulator** (`SoilSim`)：单点模拟
-- **SpatialSoilThermalSimulator** (`SpSoilSim`)：多点空间模拟，支持逐点辐射修正（SVF、太阳暴露、周围反射率/发射率）
+- **SpatialSoilThermalSimulator** (`SpSoilSim`)：多点空间模拟，支持逐点辐射修正（SVF、精细化 DNI 暴露因子、周围反射率/发射率）
+
+**增强版（2026-06-14）：** 空间模拟器引入精细化 DNI（直接法向辐射）暴露因子计算，替代原有的二值暴露因子 $f_{\text{exp}}$。通过分类障碍物设置集（ObstacleSet）支持三种障碍物类型的差异化透射处理：不透光物体（完全阻挡）、树木（Beer-Lambert 冠层透射）、半透明遮阳构件（固定透射率），实现更精确的短波辐射计算。
 
 ---
 
@@ -23,41 +25,41 @@
 
 地表温度 $T_1$（表层）通过 Force-Restore 方程更新：
 
-$$\frac{dT_1}{dt} = C_{flux} \cdot G - C_{restore} \cdot (T_1 - T_2)$$
+$$\frac{dT_1}{dt} = C_{\text{flux}} \cdot G - C_{\text{restore}} \cdot (T_1 - T_2)$$
 
 离散形式（子步迭代）：
 
-$$T_1^{new} = T_1^{prev} + \Delta t \cdot \left[ C_{flux} \cdot G - C_{restore} \cdot (T_1^{guess} - T_2^{prev}) \right]$$
+$$T_1^{\text{new}} = T_1^{\text{prev}} + \Delta t \cdot \left[ C_{\text{flux}} \cdot G - C_{\text{restore}} \cdot (T_1^{\text{guess}} - T_2^{\text{prev}}) \right]$$
 
 | 参数 | 符号 | 单位 | 说明 |
 |-----------|--------|------|-------------|
 | 表层温度 | $T_1$ | $^{\circ}\mathrm{C}$ | 地表温度（状态变量） |
 | 深层温度 | $T_2$ | $^{\circ}\mathrm{C}$ | 深层土壤温度（状态变量） |
 | 土壤热通量 | $G$ | $\mathrm{W/m^2}$ | 进入土壤的净热通量 |
-| 时间步长 | $\Delta t$ | $\mathrm{s}$ | 子步时长 $= 3600 / N_{sub} / N_{hourly}$ |
-| 每小时子步数 | $N_{sub}$ | -- | 默认 10，范围 [1, 60] |
+| 时间步长 | $\Delta t$ | $\mathrm{s}$ | 子步时长 $= 3600 / N_{\text{sub}} / N_{\text{hourly}}$ |
+| 每小时子步数 | $N_{\text{sub}}$ | -- | 默认 10，范围 [1, 60] |
 
 ### 2.2 深层温度更新
 
-$$\frac{dT_2}{dt} = C_{flux2} \cdot G + C_{deep} \cdot (T_1 - T_2)$$
+$$\frac{dT_2}{dt} = C_{\text{flux2}} \cdot G + C_{\text{deep}} \cdot (T_1 - T_2)$$
 
 离散形式：
 
-$$T_2^{new} = T_2^{prev} + \Delta t \cdot \left[ C_{flux2} \cdot G_{stored} + C_{deep} \cdot (T_1 - T_2^{prev}) \right]$$
+$$T_2^{\text{new}} = T_2^{\text{prev}} + \Delta t \cdot \left[ C_{\text{flux2}} \cdot G_{\text{stored}} + C_{\text{deep}} \cdot (T_1 - T_2^{\text{prev}}) \right]$$
 
 ### 2.3 Force-Restore 系数
 
 **恢复系数** (Deardorff 1978; Noilhan & Planton 1989, 式24)：
 
-$$C_{restore} = \frac{2\pi}{\tau_1}$$
+$$C_{\text{restore}} = \frac{2\pi}{\tau_1}$$
 
 **深层恢复系数** (Noilhan & Planton 1989, 式25)：
 
-$$C_{deep} = \frac{2\pi}{\tau_2}$$
+$$C_{\text{deep}} = \frac{2\pi}{\tau_2}$$
 
 **通量系数**：
 
-$$C_{flux} = \frac{2}{\rho C \cdot d_1}, \qquad C_{flux2} = \frac{1}{\rho C \cdot d_2}$$
+$$C_{\text{flux}} = \frac{2}{\rho C \cdot d_1}, \qquad C_{\text{flux2}} = \frac{1}{\rho C \cdot d_2}$$
 
 **时间常数**：
 
@@ -72,7 +74,7 @@ $$\tau_1 = 86400 \; \mathrm{s} \; (24 \; \mathrm{h}), \qquad \tau_2 = \tau_1 \cd
 | 深层深度 | $d_2$ | $\mathrm{m}$ | 深层土壤层厚度 | 0.5 | [0.001, 5.0] |
 | 昼夜时间常数 | $\tau_1$ | $\mathrm{s}$ | 24小时周期 | 86400 | 固定值 |
 
-> **注意：** $\rho C$ 在内部转换为 $\mathrm{J/(m^3 \cdot K)}$：$\rho C_{SI} = \rho C \times 10^6$
+> **注意：** $\rho C$ 在内部转换为 $\mathrm{J/(m^3 \cdot K)}$：$\rho C_{\text{SI}} = \rho C \times 10^6$
 
 ### 2.4 土壤热物性预设
 
@@ -102,41 +104,41 @@ $$R_n = H + LE + G$$
 
 ### 3.2 净短波辐射
 
-$$R_{n,sw} = (1 - \alpha) \cdot \frac{GHI_{raw}}{\max(0.01, \Delta t_{hours})}$$
+$$R_{n,\text{sw}} = (1 - \alpha) \cdot \frac{GHI_{\text{raw}}}{\max(0.01, \Delta t_{\text{hours}})}$$
 
 | 参数 | 符号 | 单位 | 说明 |
 |-----------|--------|------|-------------|
 | 地表反照率 | $\alpha$ | -- | 短波反射率 |
-| 水平面总辐射 | $GHI_{raw}$ | $\mathrm{Wh/m^2}$ | 来自EPW或用户覆盖值（逐时累积量） |
+| 水平面总辐射 | $GHI_{\text{raw}}$ | $\mathrm{Wh/m^2}$ | 来自EPW或用户覆盖值（逐时累积量） |
 | 时间步长因子 | -- | -- | 将小时累积量转换为瞬时速率 |
 
-> **注意：** EPW 中的 $GHI_{raw}$ 值表示前一小时内的累积量。`timeStepFactor` $= 1 / \max(0.01, \Delta t_{hours})$ 将其转换为平均速率。
+> **注意：** EPW 中的 $GHI_{\text{raw}}$ 值表示前一小时内的累积量。`timeStepFactor` $= 1 / \max(0.01, \Delta t_{\text{hours}})$ 将其转换为平均速率。
 
 ### 3.3 净长波辐射
 
-$$R_{n,lw} = \varepsilon_s \cdot (L_{\downarrow} - \sigma T_{g,K}^4)$$
+$$R_{n,\text{lw}} = \varepsilon_s \cdot (L_{\downarrow} - \sigma T_{g,\text{K}}^4)$$
 
-$$R_n = R_{n,sw} + R_{n,lw}$$
+$$R_n = R_{n,\text{sw}} + R_{n,\text{lw}}$$
 
 | 参数 | 符号 | 单位 | 说明 | 默认值 |
 |-----------|--------|------|-------------|---------|
 | 地表发射率 | $\varepsilon_s$ | -- | 地面长波发射率 | 0.95 |
 | 向下长波辐射 | $L_{\downarrow}$ | $\mathrm{W/m^2}$ | 来自EPW HIR或用户覆盖值 | EPW |
 | 斯特藩-玻尔兹曼常数 | $\sigma$ | $\mathrm{W/(m^2 \cdot K^4)}$ | $5.67 \times 10^{-8}$ | 固定值 |
-| 地表温度（K） | $T_{g,K}$ | $\mathrm{K}$ | $T_g + 273.15$ | -- |
+| 地表温度（K） | $T_{g,\text{K}}$ | $\mathrm{K}$ | $T_g + 273.15$ | -- |
 
 ### 3.4 感热通量
 
-$$H = \rho C_p \cdot \frac{T_g - T_{air}}{r_a}$$
+$$H = \rho C_p \cdot \frac{T_g - T_{\text{air}}}{r_a}$$
 
-$$\rho C_p = \rho_{air} \cdot 1004$$
+$$\rho C_p = \rho_{\text{air}} \cdot 1004$$
 
 | 参数 | 符号 | 单位 | 说明 |
 |-----------|--------|------|-------------|
-| 空气密度 | $\rho_{air}$ | $\mathrm{kg/m^3}$ | 由理想气体定律计算（见第7节） |
+| 空气密度 | $\rho_{\text{air}}$ | $\mathrm{kg/m^3}$ | 由理想气体定律计算（见第7节） |
 | 空气比热 | $C_p$ | $\mathrm{J/(kg \cdot K)}$ | 1004（定压干空气） |
 | 地表温度 | $T_g$ | $^{\circ}\mathrm{C}$ | Force-Restore 输出的 $T_1$ |
-| 空气温度 | $T_{air}$ | $^{\circ}\mathrm{C}$ | EPW干球温度或用户覆盖值 |
+| 空气温度 | $T_{\text{air}}$ | $^{\circ}\mathrm{C}$ | EPW干球温度或用户覆盖值 |
 | 空气动力学阻力 | $r_a$ | $\mathrm{s/m}$ | 由对数律计算（见第8节） |
 
 ---
@@ -153,9 +155,9 @@ $$LE = \frac{\Delta \cdot (R_n - G) + \rho C_p \cdot VPD / r_a}{\Delta + \gamma 
 
 **与 G 的迭代耦合：** 由于 $G = R_n - H - LE$，$G$ 出现在等式两侧。模型进行迭代（最多5次，松弛因子0.5）：
 
-$$G^{new} = R_n - H - LE^{(k)}, \qquad G^{(k+1)} = 0.5 \cdot G^{(k)} + 0.5 \cdot G^{new}$$
+$$G^{\text{new}} = R_n - H - LE^{(k)}, \qquad G^{(k+1)} = 0.5 \cdot G^{(k)} + 0.5 \cdot G^{\text{new}}$$
 
-收敛准则：$|G^{new} - G^{(k)}| < 1.0 \; \mathrm{W/m^2}$
+收敛准则：$|G^{\text{new}} - G^{(k)}| < 1.0 \; \mathrm{W/m^2}$
 
 | 参数 | 符号 | 单位 | 说明 | 来源 |
 |-----------|--------|------|-------------|--------|
@@ -166,25 +168,25 @@ $$G^{new} = R_n - H - LE^{(k)}, \qquad G^{(k+1)} = 0.5 \cdot G^{(k)} + 0.5 \cdot
 
 **LE 裁剪与能量再分配：**
 
-当 $LE$ 超过物理上限 $LE_{max}$（默认 1000 W/m$^2$）时：
+当 $LE$ 超过物理上限 $LE_{\text{max}}$（默认 1000 W/m$^2$）时：
 
-$$LE_{clipped} = \mathrm{clip}(LE, \; 0, \; LE_{max})$$
+$$LE_{\text{clipped}} = \mathrm{clip}(LE, \; 0, \; LE_{\text{max}})$$
 
-$$LE_{excess} = LE - LE_{clipped}$$
+$$LE_{\text{excess}} = LE - LE_{\text{clipped}}$$
 
 多余能量按 60% 分配给 G、40% 分配给 H 进行再分配，以维持能量平衡：
 
-$$G_{final} = G + 0.6 \cdot LE_{excess}, \qquad H_{final} = H + 0.4 \cdot LE_{excess}$$
+$$G_{\text{final}} = G + 0.6 \cdot LE_{\text{excess}}, \qquad H_{\text{final}} = H + 0.4 \cdot LE_{\text{excess}}$$
 
 ### 4.2 方法 2: 简化法（向后兼容）
 
-$$LE = \beta_{moist} \cdot \frac{\rho_{air} C_p}{\gamma} \cdot \frac{VPD}{r_a}$$
+$$LE = \beta_{\text{moist}} \cdot \frac{\rho_{\text{air}} C_p}{\gamma} \cdot \frac{VPD}{r_a}$$
 
 对 $r_a$ 设置下限：$r_a \geq 10 \; \mathrm{s/m}$
 
 | 参数 | 符号 | 单位 | 默认值 | 范围 |
 |-----------|--------|------|---------|-------|
-| 水分可用性 | $\beta_{moist}$ | -- | 0.3 | [0, 1] |
+| 水分可用性 | $\beta_{\text{moist}}$ | -- | 0.3 | [0, 1] |
 
 ### 4.3 方法 3: 无潜热
 
@@ -213,11 +215,11 @@ $$\Delta(T) = \frac{4098 \cdot e_s(T)}{(T + 237.3)^2}$$
 
 由相对湿度计算：
 
-$$e_a = e_s(T_{air}) \cdot \frac{RH}{100}$$
+$$e_a = e_s(T_{\text{air}}) \cdot \frac{RH}{100}$$
 
 由 RH 覆盖值计算（当用户提供自定义 RH 时）：
 
-$$e_a = e_s(T_{air}^{override}) \cdot \frac{RH^{override}}{100}$$
+$$e_a = e_s(T_{\text{air}}^{\text{override}}) \cdot \frac{RH^{\text{override}}}{100}$$
 
 | 参数 | 符号 | 单位 | 说明 | 来源 |
 |-----------|--------|------|-------------|--------|
@@ -241,13 +243,13 @@ $$\lambda(T) = 2.501 \times 10^6 - 2361 \cdot T$$
 
 ### 6.1 空气密度（理想气体定律）
 
-$$\rho_{air} = \frac{P_a \times 1000}{R_d \cdot (T_{air} + 273.15)}$$
+$$\rho_{\text{air}} = \frac{P_a \times 1000}{R_d \cdot (T_{\text{air}} + 273.15)}$$
 
 | 参数 | 符号 | 单位 | 数值 | 说明 |
 |-----------|--------|------|-------|-------------|
 | 大气压力 | $P_a$ | $\mathrm{kPa}$ | EPW 或 101.325 | 站点气压 |
 | 干空气气体常数 | $R_d$ | $\mathrm{J/(kg \cdot K)}$ | 287.05 | 固定值 |
-| 空气温度 | $T_{air}$ | $^{\circ}\mathrm{C}$ | EPW 或覆盖值 | -- |
+| 空气温度 | $T_{\text{air}}$ | $^{\circ}\mathrm{C}$ | EPW 或覆盖值 | -- |
 
 ### 6.2 干湿表常数
 
@@ -281,7 +283,7 @@ $$r_a = \frac{\ln(z/z_{0m}) \cdot \ln(z/z_{0h})}{k^2 \cdot u}$$
 
 ### 7.2 理查森数（大气稳定度）
 
-$$Ri = \frac{g \cdot (T_g - T_{air}) \cdot z}{(T_{air} + 273.15) \cdot u^2}$$
+$$Ri = \frac{g \cdot (T_g - T_{\text{air}}) \cdot z}{(T_{\text{air}} + 273.15) \cdot u^2}$$
 
 | 参数 | 符号 | 单位 | 数值 | 说明 |
 |-----------|--------|------|-------|-------------|
@@ -289,13 +291,13 @@ $$Ri = \frac{g \cdot (T_g - T_{air}) \cdot z}{(T_{air} + 273.15) \cdot u^2}$$
 
 ### 7.3 Louis (1979) 稳定度修正
 
-$$f_{stab} = \begin{cases}
+$$f_{\text{stab}} = \begin{cases}
 \displaystyle\frac{1}{1 + c \cdot \sqrt{-Ri}} & Ri < 0 \quad \text{（不稳定）} \\[12pt]
 1 + d \cdot Ri & Ri > 0 \quad \text{（稳定）} \\[12pt]
 1 & Ri = 0 \quad \text{（中性）}
 \end{cases}$$
 
-修正后的阻力：$r_a^{corr} = r_a \cdot f_{stab}$
+修正后的阻力：$r_a^{\text{corr}} = r_a \cdot f_{\text{stab}}$
 
 | 参数 | 符号 | 默认值 | 说明 |
 |-----------|--------|---------|-------------|
@@ -304,12 +306,12 @@ $$f_{stab} = \begin{cases}
 
 ### 7.4 阻力裁剪
 
-$$r_a = \mathrm{clip}(r_a, \; r_a^{min}, \; r_a^{max})$$
+$$r_a = \mathrm{clip}(r_a, \; r_a^{\text{min}}, \; r_a^{\text{max}})$$
 
 | 参数 | 符号 | 单位 | 默认值 | 范围 |
 |-----------|--------|------|---------|-------|
-| 最小阻力 | $r_a^{min}$ | $\mathrm{s/m}$ | 10 | [1, $r_a^{max}$-1] |
-| 最大阻力 | $r_a^{max}$ | $\mathrm{s/m}$ | 500 | [50, 5000] |
+| 最小阻力 | $r_a^{\text{min}}$ | $\mathrm{s/m}$ | 10 | [1, $r_a^{\text{max}}$-1] |
+| 最大阻力 | $r_a^{\text{max}}$ | $\mathrm{s/m}$ | 500 | [50, 5000] |
 
 ---
 
@@ -321,15 +323,15 @@ $$r_a = \mathrm{clip}(r_a, \; r_a^{min}, \; r_a^{max})$$
 
 **方法 0: Noilhan & Planton (ISBA)**
 
-$$\beta = \frac{w_g}{w_{sat}}$$
+$$\beta = \frac{w_g}{w_{\text{sat}}}$$
 
 **方法 1: 直接法（用户指定）**
 
-$$\beta = \beta_{direct}$$
+$$\beta = \beta_{\text{direct}}$$
 
 **方法 2: Kondo & Saigusa (1994)**
 
-$$\beta = \frac{1}{1 + \exp\left[-b \cdot \left(\frac{w_g}{w_{sat}} - a\right)\right]}$$
+$$\beta = \frac{1}{1 + \exp\left[-b \cdot \left(\frac{w_g}{w_{\text{sat}}} - a\right)\right]}$$
 
 | 质地索引 | 土壤类型 | $a$ (阈值) | $b$ (陡度) |
 |:---:|:---:|:---:|:---:|
@@ -341,30 +343,30 @@ $$\beta = \frac{1}{1 + \exp\left[-b \cdot \left(\frac{w_g}{w_{sat}} - a\right)\r
 
 **方法 3: 幂律**
 
-$$\beta = \left(\frac{w_g}{w_{sat}}\right)^{b_{exp}}$$
+$$\beta = \left(\frac{w_g}{w_{\text{sat}}}\right)^{b_{\text{exp}}}$$
 
 | 参数 | 符号 | 单位 | 默认值 | 范围 | 说明 |
 |-----------|--------|------|---------|-------|-------------|
 | 表层土壤含水量 | $w_g$ | $\mathrm{m^3/m^3}$ | 0.25 | [0, 0.8] | 体积土壤含水量 |
-| 田间持水量 | $w_{sat}$ | $\mathrm{m^3/m^3}$ | 0.35 | [0.01, 0.9] | 饱和含水量/田间持水量 |
-| Beta 指数 | $b_{exp}$ | -- | 1.0 | [0.1, 5.0] | 幂律指数 |
-| 最小 beta | $\beta_{min}$ | -- | 0.05 | [0, 1] | 下限 |
+| 田间持水量 | $w_{\text{sat}}$ | $\mathrm{m^3/m^3}$ | 0.35 | [0.01, 0.9] | 饱和含水量/田间持水量 |
+| Beta 指数 | $b_{\text{exp}}$ | -- | 1.0 | [0.1, 5.0] | 幂律指数 |
+| 最小 beta | $\beta_{\text{min}}$ | -- | 0.05 | [0, 1] | 下限 |
 
-Beta 始终经过裁剪：$\beta = \mathrm{clip}(\beta, \; \beta_{min}, \; 1.0)$
+Beta 始终经过裁剪：$\beta = \mathrm{clip}(\beta, \; \beta_{\text{min}}, \; 1.0)$
 
 ### 8.2 土壤表面阻力 (ISBA 模型)
 
-$$r_s = r_s^{min} \cdot \exp\left[a_{sens} \cdot (1 - \beta)\right]$$
+$$r_s = r_s^{\text{min}} \cdot \exp\left[a_{\text{sens}} \cdot (1 - \beta)\right]$$
 
 边界条件：
-- 当 $\beta \geq 1.0$：$r_s = r_s^{min}$（饱和，最小阻力）
-- 当 $\beta \leq 0.01$：$r_s = r_s^{max}$（干燥，最大阻力）
+- 当 $\beta \geq 1.0$：$r_s = r_s^{\text{min}}$（饱和，最小阻力）
+- 当 $\beta \leq 0.01$：$r_s = r_s^{\text{max}}$（干燥，最大阻力）
 
 | 参数 | 符号 | 单位 | 默认值 | 范围 | 说明 |
 |-----------|--------|------|---------|-------|-------------|
-| 最小土壤阻力 | $r_s^{min}$ | $\mathrm{s/m}$ | 50 | [10, 1000] | 湿润土壤表面阻力 |
-| 最大土壤阻力 | $r_s^{max}$ | $\mathrm{s/m}$ | 500 | [$r_s^{min}$+10, 10000] | 干燥土壤表面阻力 |
-| Beta 敏感度 | $a_{sens}$ | -- | 5.0 | -- | ISBA 敏感度指数 |
+| 最小土壤阻力 | $r_s^{\text{min}}$ | $\mathrm{s/m}$ | 50 | [10, 1000] | 湿润土壤表面阻力 |
+| 最大土壤阻力 | $r_s^{\text{max}}$ | $\mathrm{s/m}$ | 500 | [$r_s^{\text{min}}$+10, 10000] | 干燥土壤表面阻力 |
+| Beta 敏感度 | $a_{\text{sens}}$ | -- | 5.0 | -- | ISBA 敏感度指数 |
 
 ---
 
@@ -374,74 +376,90 @@ $$r_s = r_s^{min} \cdot \exp\left[a_{sens} \cdot (1 - \beta)\right]$$
 
 由潜热通量计算逐时蒸散发量：
 
-$$ET = \frac{LE}{\lambda(T_{air})} \times 3600 \quad [\mathrm{mm/h}]$$
+$$ET = \frac{LE}{\lambda(T_{\text{air}})} \times 3600 \quad [\mathrm{mm/h}]$$
 
 ### 9.2 参考 ET（FAO-56 Penman-Monteith 草地）
 
 参考蒸散发计算采用 FAO-56 标准参数，对应假想的草地参考表面（$h = 0.12$ m）：
 
-$$ET_{ref} = \frac{1}{\lambda(T_{air})} \cdot \frac{\Delta \cdot (R_n - G) + \rho C_p \cdot VPD / r_a^{grass}}{\Delta + \gamma \cdot (1 + r_s^{grass} / r_a^{grass})} \times 3600 \quad [\mathrm{mm/h}]$$
+$$ET_{\text{ref}} = \frac{1}{\lambda(T_{\text{air}})} \cdot \frac{\Delta \cdot (R_n - G) + \rho C_p \cdot VPD / r_a^{\text{grass}}}{\Delta + \gamma \cdot (1 + r_s^{\text{grass}} / r_a^{\text{grass}})} \times 3600 \quad [\mathrm{mm/h}]$$
 
 固定参考参数：
 
 | 参数 | 数值 | 说明 |
 |-----------|-------|-------------|
-| $r_a^{grass}$ | $208 / u$ | 草地空气动力学阻力 [s/m] |
-| $r_s^{grass}$ | 70 | 草地整体表面阻力 [s/m] |
+| $r_a^{\text{grass}}$ | $208 / u$ | 草地空气动力学阻力 [s/m] |
+| $r_s^{\text{grass}}$ | 70 | 草地整体表面阻力 [s/m] |
 
 ---
 
 ## 10. 空间辐射修正（仅空间模拟器）
 
-空间模拟器利用天空视角系数（SVF）、太阳暴露因子和周围表面属性进行逐点辐射修正。
+空间模拟器利用天空视角系数（SVF）、有效 DNI 暴露因子和周围表面属性进行逐点辐射修正。
 
 ### 10.1 修正短波辐射 (GHI)
 
-$$GHI_{actual} = DHI \cdot SVF + DNI \cdot \sin(\alpha) \cdot f_{DNI} + \rho_{sur} \cdot GHI_{surround} \cdot (1 - SVF)$$
+$$GHI_{\text{actual}} = DHI \cdot SVF + DNI \cdot \sin(\alpha) \cdot f_{\text{DNI}} + \rho_{\text{sur}} \cdot GHI_{\text{surround}} \cdot (1 - SVF)$$
 
 其中：
 
-$$GHI_{surround} = DHI + DNI \cdot \sin(\alpha)$$
+$$GHI_{\text{surround}} = DHI + DNI \cdot \sin(\alpha)$$
 
-**有效DNI暴露因子 $f_{DNI}$（增强版，2026-06-14）：**
+**有效 DNI 暴露因子 $f_{\text{DNI}}$（增强版，2026-06-14）：**
 
-替代原有的二值暴露因子 $f_{exp}$（仅判断遮挡/未遮挡），引入有效DNI暴露因子 $f_{DNI}$，支持三种障碍物类型的差异化透射处理：
+替代原有的二值暴露因子 $f_{\text{exp}}$（仅判断遮挡/未遮挡），引入有效 DNI 暴露因子 $f_{\text{DNI}}$，支持三种障碍物类型的差异化透射处理。
 
-| 击中类型 | DNI贡献 | 物理含义 |
-|:---:|:---:|:---|
-| 无遮挡 | 1.0 | 全额直接辐射 |
-| 不透光物体 (Opaque) | 0.0 | 完全阻挡，其后方Tree/Translucent均处于阴影中 |
-| 树木细节模型 (Tree) | $\exp(-k \cdot \text{LAD} \cdot s)$ | Beer-Lambert冠层透射（仅当射线路径无Opaque时） |
-| 半透明遮阳构件 (Translucent) | $\tau$ | 固定透射率透射（仅当射线路径无Opaque时） |
+**物理逻辑修正（2026-06-14）：** 光线从太阳射向地面（正向），代码使用反向光线追踪（从地面采样点向太阳方向发射射线）。关键物理约束：**不透光物体 (Opaque) 具有绝对遮挡优先权**——如果射线路径上存在任何不透光障碍物，其后面的树木或半透明遮阳构件均处于建筑阴影中，不应再计算 DNI 透射。
 
-判断逻辑：
+判断逻辑（修正后）：
 1. 射线路径上**有任何不透光物体** → DNI = 0（完全阻挡）
-2. 无Opaque时 → 找**从太阳方向最近**的Tree/Translucent障碍物
+2. 无 Opaque 时 → 找**从太阳方向最近**的 Tree/Translucent 障碍物
 3. 全部无遮挡 → DNI = 全额
 
-植被冠层透射方程（Beer-Lambert定律）：
+| 击中类型 | DNI 贡献 | 物理含义 |
+|:---:|:---:|:---|
+| 无遮挡 | 1.0 | 全额直接辐射 |
+| 不透光物体 (Opaque) | 0.0 | 完全阻挡，其后方 Tree/Translucent 均处于阴影中 |
+| 树木细节模型 (Tree) | $\exp(-k \cdot \text{LAD} \cdot s)$ | Beer-Lambert 冠层透射（仅当射线路径无 Opaque 时） |
+| 半透明遮阳构件 (Translucent) | $\tau$ | 固定透射率透射（仅当射线路径无 Opaque 时） |
+
+植被冠层透射方程（Beer-Lambert 定律）：
 
 $$I_{\text{transmitted}} = I_{\text{DN}} \cdot \exp(-k \cdot \text{LAD} \cdot s)$$
 
-其中 $s$ 为光线穿过树木冠层的几何路径长度 [m]，$k$ 为消光系数，$\text{LAD}$ 为叶面积密度 [m²/m³]，$\tau$ 为遮阳构件透射率。
+其中：
+- $s$：光线穿过树木冠层的几何路径长度 [m]，通过 `CalculateCanopyPathLength` 方法计算（射线与简化冠层模型的进出交点距离）
+- $k$：消光系数 [-]，默认 0.65，典型范围 0.5–0.8（阔叶）、0.3–0.5（针叶）
+- $\text{LAD}$：叶面积密度 [m²/m³]，默认 1.0，典型范围 0.5–8.0
+- $\tau$：遮阳构件透射率 [-]，默认 0.05
+
+**计算流程（SpatialSoilThermalSimulator.cs）：**
+
+1. 从 `GroundSurfaceConfig.ObstacleSet` 读取分类障碍物设置
+2. 调用 `GetAllMeshes()` 获取全部 Mesh 用于 SVF 计算
+3. 对每个时刻、每个地面点，调用 `CalculateDNIExposureFactorsBatch()` 计算 $f_{\text{DNI}}$
+4. 将 $f_{\text{DNI}}$ 代入短波辐射修正公式计算 $GHI_{\text{actual}}$
+5. 修正后的 $GHI_{\text{actual}}$ 作为输入驱动 Force-Restore + Penman-Monteith 模拟
+
+**向后兼容：** 当未连接 ObsSet 组件（无障碍物分类）时，使用传统的 `CalculateExposureFactorsBatch()` 方法，$f_{\text{DNI}} = f_{\text{exp}}$。
 
 ### 10.2 修正长波辐射
 
-$$L_{\downarrow}^{actual} = L_{sky} \cdot SVF + \varepsilon_{sur} \cdot \sigma \cdot T_{sur,K}^4 \cdot (1 - SVF)$$
+$$L_{\downarrow}^{\text{actual}} = L_{\text{sky}} \cdot SVF + \varepsilon_{\text{sur}} \cdot \sigma \cdot T_{\text{sur,K}}^4 \cdot (1 - SVF)$$
 
 其中：
 
-$$L_{sky} = HIR_{EPW} \cdot SVF$$
+$$L_{\text{sky}} = HIR_{\text{EPW}} \cdot SVF$$
 
 | 参数 | 符号 | 单位 | 默认值 | 说明 |
 |-----------|--------|------|---------|-------------|
 | 天空视角系数 | $SVF$ | -- | 1.0（无障碍物） | [0, 1]；可见天空半球的比例 |
-| 有效DNI暴露因子 | $f_{DNI}$ | -- | -- | [0, 1]；综合暴露与透射的DNI有效因子 |
-| 太阳暴露因子 | $f_{exp}$ | -- | -- | [0, 1]；二值：太阳直射未被遮挡的比例（遗留字段） |
+| 有效 DNI 暴露因子 | $f_{\text{DNI}}$ | -- | -- | [0, 1]；综合暴露与透射的 DNI 有效因子 |
+| 太阳暴露因子 | $f_{\text{exp}}$ | -- | -- | [0, 1]；二值：太阳直射未被遮挡的比例（遗留字段） |
 | 太阳高度角 | $\alpha$ | rad | -- | 由 SPA 太阳位置计算 |
-| 周围反射率 | $\rho_{sur}$ | -- | 0.2 | 周围表面短波反射率 |
-| 周围发射率 | $\varepsilon_{sur}$ | -- | 0.95 | 周围表面长波发射率 |
-| 周围温度 | $T_{sur}$ | $^{\circ}\mathrm{C}$ | $T_{air}$ | 周围表面温度（用户覆盖值或EPW空气温度） |
+| 周围反射率 | $\rho_{\text{sur}}$ | -- | 0.2 | 周围表面短波反射率 |
+| 周围发射率 | $\varepsilon_{\text{sur}}$ | -- | 0.95 | 周围表面长波发射率 |
+| 周围温度 | $T_{\text{sur}}$ | $^{\circ}\mathrm{C}$ | $T_{\text{air}}$ | 周围表面温度（用户覆盖值或 EPW 空气温度） |
 
 ---
 
@@ -495,7 +513,7 @@ $$L_{sky} = HIR_{EPW} \cdot SVF$$
 | 端口 | 名称 | 类型 | 必填 | 说明 |
 |------|------|------|----------|-------------|
 | 0 | `GSurf` | Brep | **是** | 地面表面几何体 |
-| 1 | `ObsSet` | Generic | 否 | **增强版（2026-06-14）**：分类障碍物设置集（ObstacleSet）。连接ObsSet组件。支持不透光建筑、树木冠层透射（Beer-Lambert）、半透明遮阳。向后兼容：可接受List<Brep>或List<Mesh> |
+| 1 | `ObsSet` | Generic | 否 | **增强版（2026-06-14）**：分类障碍物设置集（ObstacleSet）。连接 ObsSet 组件。支持不透光建筑、树木冠层透射（Beer-Lambert）、半透明遮阳。向后兼容：可接受 List<Brep> 或 List<Mesh> |
 | 2 | `Res` | Number | 否 | 网格分辨率 [m] |
 | 3 | `d1` | Number | 否 | 表层深度 [m] |
 | 4 | `d2` | Number | 否 | 深层深度 [m] |
@@ -508,13 +526,13 @@ $$L_{sky} = HIR_{EPW} \cdot SVF$$
 
 ## 12. 温度与湿度之间的物理一致性
 
-当覆盖空气温度而不调整相对湿度时，温度 ($T_{air}$)、相对湿度 ($RH$) 与实际水汽压 ($e_a$) 之间的物理一致性可能被破坏，因为：
+当覆盖空气温度而不调整相对湿度时，温度 ($T_{\text{air}}$)、相对湿度 ($RH$) 与实际水汽压 ($e_a$) 之间的物理一致性可能被破坏，因为：
 
-$$e_a = e_s(T_{air}) \cdot \frac{RH}{100}$$
+$$e_a = e_s(T_{\text{air}}) \cdot \frac{RH}{100}$$
 
-如果 $T_{air}$ 改变而 $RH$ 保持不变，$e_a$ 会以非物理的方式变化。为保持一致性，每当覆盖 `AirTemp` 时，应同时提供自定义 `RH` 输入（土壤热设置的第8端口）：
+如果 $T_{\text{air}}$ 改变而 $RH$ 保持不变，$e_a$ 会以非物理的方式变化。为保持一致性，每当覆盖 `AirTemp` 时，应同时提供自定义 `RH` 输入（土壤热设置的第8端口）：
 
-$$RH^{new} = \frac{e_s(T_{air}^{original})}{e_s(T_{air}^{override})} \cdot RH^{original} \cdot 100 \quad \text{（以保持 } e_a \text{ 不变）}$$
+$$RH^{\text{new}} = \frac{e_s(T_{\text{air}}^{\text{original}})}{e_s(T_{\text{air}}^{\text{override}})} \cdot RH^{\text{original}} \cdot 100 \quad \text{（以保持 } e_a \text{ 不变）}$$
 
 `RH` 输入支持与 `AirTemp` 相同的多模式结构：单值、逐点常数、时间序列、或逐点时间序列。
 
@@ -535,7 +553,7 @@ $$RH^{new} = \frac{e_s(T_{air}^{original})}{e_s(T_{air}^{override})} \cdot RH^{o
 
 ### 13.2 状态变量初始化
 
-$$T_1^{init} = T_{air}^{first} \; \text{或} \; T_{user}^{surf}, \qquad T_2^{init} = T_{mean}^{annual} \; \text{或} \; T_{air}^{first}$$
+$$T_1^{\text{init}} = T_{\text{air}}^{\text{first}} \; \text{或} \; T_{\text{user}}^{\text{surf}}, \qquad T_2^{\text{init}} = T_{\text{mean}}^{\text{annual}} \; \text{或} \; T_{\text{air}}^{\text{first}}$$
 
 ---
 
@@ -554,6 +572,3 @@ $$T_1^{init} = T_{air}^{first} \; \text{或} \; T_{user}^{surf}, \qquad T_2^{ini
 6. **Tetens, O.** (1930). Uber einige meteorologische Begriffe. *Z. Geophys.*, 6, 297-309.
 
 7. **Reda, I. & Andreas, A.** (2004). Solar Position Algorithm for Solar Radiation Applications. *Solar Energy*, 76(5), 577-589. https://doi.org/10.1016/j.solener.2003.12.003
-
----
-
