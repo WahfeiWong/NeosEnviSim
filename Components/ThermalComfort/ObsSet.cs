@@ -70,7 +70,7 @@ namespace ThermalComfort
                 GH_ParamAccess.list);
 
             // (5) Translucent transmittance
-            pManager.AddNumberParameter("Transmittance", "Tans",
+            pManager.AddNumberParameter("Transmittance", "τ",
                 "Direct solar radiation transmittance of translucent sunshades [-]. " +
                 "Default 0.05. Range: 0.0 (opaque) to 1.0 (fully transparent). " +
                 "Typical: perforated metal 0.05–0.15, fabric 0.02–0.30, PC (Polycarbonate) sheet 0.60–0.85.",
@@ -151,7 +151,7 @@ namespace ThermalComfort
                     $"ObsSet: {totalMeshes} meshes — " +
                     $"TreeDet={treeDetailMeshes.Count}, TreeCan={treeCanopyMeshes.Count}, " +
                     $"TransShd={translucentShadeMeshes.Count}, Opaque={opaqueObjectMeshes.Count} | " +
-                    $"LAD={leafAreaDensity:F2}, k={extinctionCoefficient:F2}, Tau={translucentTransmittance:F3}");
+                    $"LAD={leafAreaDensity:F2}, k={extinctionCoefficient:F2}, τ={translucentTransmittance:F3}");
             }
             else
             {
