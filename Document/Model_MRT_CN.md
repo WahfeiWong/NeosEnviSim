@@ -2,6 +2,8 @@
 
 本模块用于计算室外环境中人体的平均辐射温度（MRT），基于反向光线追踪的建筑/植被遮挡分析，支持 SolarCal（ASHRAE 55）和 RayMan 两种计算模型，并采用全 4π 球面视角系数分解实现物理上正确的长波辐射计算。
 
+**增强版（2026-06-15）：** 修正 DNI 物理模型——当射线同时与多类非 Opaque 障碍物相交时，DNI 贡献率改为多种（或多个同类）障碍物各自 DNI 贡献率的**乘积**，而非仅考虑从太阳方向最近的遮挡。新增 `CalculateRayDNITransmission` 核心方法，替代原有的 `ClassifyRayHit` 单障碍物分类逻辑。ObsSet 输入端**不再向后兼容**，仅接受 ObstacleSet 封装数据。
+
 **增强版（2026-06-14）：** 引入精细化 DNI（直接法向辐射）暴露因子计算，支持三种障碍物类型的差异化透射处理：不透光物体（完全阻挡）、树木（Beer-Lambert 冠层透射）、半透明遮阳构件（固定透射率）。通过分类障碍物设置集（ObstacleSet）替代原有的平面 Brep 列表输入，实现更精确的直接辐射计算。
 
 ---
@@ -29,7 +31,7 @@ $$I_{\text{body}} = f_{\text{DNI}} \cdot f_p(\gamma) \cdot I_{\text{DN}} + \frac
 - $F_{\text{GVF}}$：地面视角系数
 - $\rho_g$：地面反射率
 
-> **注意（2026-06-14）：** 直接辐射项现已使用有效 DNI 暴露因子 $f_{\text{DNI}}$ 替代传统的二值暴露因子 $f_{\text{exp}}$。$f_{\text{DNI}}$ 综合考虑了障碍物类型（不透光/树木/半透明遮阳）对直接辐射的差异化透射效应。当未连接 ObsSet 组件（无障碍物分类）时，$f_{\text{DNI}} = f_{\text{exp}}$，保持向后兼容。
+> **注意（2026-06-15）：** 直接辐射项使用有效 DNI 暴露因子 $f_{\text{DNI}}$ 替代传统的二值暴露因子 $f_{\text{exp}}$。$f_{\text{DNI}}$ 综合考虑了障碍物类型（不透光/树木/半透明遮阳）对直接辐射的差异化透射效应，且当射线同时穿过多种非 Opaque 障碍物时，各项透射率**相乘**（物理修正）。当未连接 ObsSet 组件（无障碍物）时，$f_{\text{DNI}} = 1.0$（全额直射）。
 
 短波引起的 MRT 增量：
 
@@ -99,7 +101,7 @@ $$L_{\text{obs}} = \varepsilon_{\text{obs}} \cdot \sigma \cdot T_{\text{obs,K}}^
 
 $$I_{\text{direct}} = f_{\text{DNI}} \cdot f_p(\gamma) \cdot I_{\text{DN}}$$
 
-> **注意（2026-06-14）：** 直接辐射项现已使用 $f_{\text{DNI}}$ 替代 $f_{\text{exp}}$。$f_{\text{DNI}}$ 通过 ObstacleSet 和 HumanExposureModel 中的精细化计算获得（见第 2 节）。
+> **注意（2026-06-15）：** 直接辐射项使用 $f_{\text{DNI}}$ 替代 $f_{\text{exp}}$。$f_{\text{DNI}}$ 通过 ObstacleSet 和 HumanExposureModel 中的精细化计算获得，当射线穿过多种非 Opaque 障碍物时，各项透射率相乘（见第 2.1 节）。
 
 ### 1.3 统一入口
 
@@ -109,14 +111,14 @@ $$I_{\text{direct}} = f_{\text{DNI}} \cdot f_p(\gamma) \cdot I_{\text{DN}}$$
 
 ## 2. 人体暴露因子与视角系数模型（HumanExposureModel.cs）
 
-### 2.1 太阳暴露因子计算（增强版，2026-06-14）
+### 2.1 太阳暴露因子计算（增强版，2026-06-15）
 
 使用反向光线追踪计算人体被太阳直接照射的比例。本模块提供两种暴露因子：
 
 - **$f_{\text{exp}}$（传统暴露因子）：** 二值判断，仅确定采样点是否被遮挡（0 或 1）
-- **$f_{\text{DNI}}$（有效 DNI 暴露因子）：** 综合暴露与透射效应，支持三种障碍物类型的差异化处理
+- **$f_{\text{DNI}}$（有效 DNI 暴露因子）：** 综合暴露与透射效应，支持三种障碍物类型的差异化处理，且多障碍物透射率**相乘**
 
-**传统暴露因子算法（向后兼容）：**
+**传统暴露因子算法：**
 
 1. 沿人体高度方向均匀布置 $N$ 个采样点（默认 $N=3$，从地面到全身高度）
 2. 对每个采样点，沿太阳方向发射射线
@@ -125,29 +127,41 @@ $$I_{\text{direct}} = f_{\text{DNI}} \cdot f_p(\gamma) \cdot I_{\text{DN}}$$
 
 $$f_{\text{exp}} = \frac{N_{\text{exposed}}}{N_{\text{total}}}$$
 
-**有效 DNI 暴露因子 $f_{\text{DNI}}$（增强版）：**
+**有效 DNI 暴露因子 $f_{\text{DNI}}$（增强版，2026-06-15）：**
 
-对每个高度采样点沿太阳方向发射射线，根据击中障碍物的类型分别计算 DNI 贡献：
+对每个高度采样点沿太阳方向发射射线，计算穿过**所有**非 Opaque 障碍物的累积透射率：
 
 | 击中类型 | DNI 贡献 | 物理含义 |
 |:---:|:---:|:---|
 | 无遮挡 | 1.0 | 全额直接辐射 |
 | 不透光物体 (Opaque) | 0.0 | 完全阻挡，其后方所有 Tree/Translucent 均处于阴影中 |
-| 树木细节模型 (Tree) | $\exp(-k \cdot \text{LAD} \cdot s)$ | Beer-Lambert 冠层透射（仅当射线路径无 Opaque 时） |
-| 半透明遮阳构件 (Translucent) | $\tau$ | 固定透射率透射（仅当射线路径无 Opaque 时） |
+| 树木细节模型 (Tree) | $\exp(-k \cdot \text{LAD} \cdot s)$ | Beer-Lambert 冠层透射（路径长度可跨多个树冠累加） |
+| 半透明遮阳构件 (Translucent) | $\tau$ | 固定透射率（每个相交的 Translucent Mesh 独立贡献，多个相乘） |
+
+**多障碍物 DNI 透射（2026-06-15 物理修正）：**
+
+当射线同时穿过多种（或多个同类）非 Opaque 障碍物时，总 DNI 透射率为各障碍物透射率的**乘积**：
+
+$$T_{\text{total}} = T_{\text{tree}} \times T_{\text{translucent,1}} \times T_{\text{translucent,2}} \times \cdots$$
+
+其中：
+- $T_{\text{tree}} = \exp(-k \cdot \text{LAD} \cdot s_{\text{total}})$：穿过所有树冠的总透射率（总路径长度 $s_{\text{total}}$ 为各树冠路径长度之和）
+- $T_{\text{translucent},i} = \tau$：第 $i$ 个半透明遮阳构件的透射率（每个独立相乘）
+
+**示例：** 光线先穿过树冠（透射率 0.6），再穿过两个半透明遮阳板（透射率各 0.5）：
+
+$$T_{\text{total}} = 0.6 \times 0.5 \times 0.5 = 0.15$$
 
 有效 DNI 暴露因子为所有采样点 DNI 贡献的平均值：
 
 $$f_{\text{DNI}} = \frac{1}{N} \sum_{i=1}^{N} \text{DNI}_{\text{contrib},i}$$
 
-**物理逻辑修正（2026-06-14）：**
+**核心物理逻辑：**
 
-光线从太阳射向地面（正向），代码使用反向光线追踪（从人体采样点向太阳方向发射射线）。关键物理约束：**不透光物体 (Opaque) 具有绝对遮挡优先权**——如果射线路径上存在任何不透光障碍物，其后面的树木或半透明遮阳构件均处于建筑阴影中，不应再计算 DNI 透射。
-
-判断逻辑（修正后）：
-1. 先检测所有 Opaque Mesh——**有任何交点立即返回 Opaque**（DNI = 0）
-2. 无 Opaque 交点时，在所有 Tree/Translucent Mesh 中找**从人体方向最远**的交点（等价于从太阳方向第一个遇到的障碍物）
-3. 若射线同时与多类非 Opaque 障碍物相交，以从太阳方向最近的障碍物类型为准
+1. **Opaque 绝对优先**：射线路径上任何 Opaque 交点 → DNI = 0
+2. **Tree 透射**：命中任何 TreeDetail → 使用总冠层路径长度计算 Beer-Lambert 透射
+3. **Translucent 透射**：命中每个 TranslucentShade Mesh → 各自乘以 $\tau$
+4. **乘积法则**：所有非 Opaque 透射率相乘，结果 clamp 到 [0, 1]
 
 **Beer-Lambert 冠层透射方程：**
 
@@ -177,14 +191,15 @@ $$s = t_{\text{exit}} - t_{\text{entry}}$$
 
 其中 $t_{\text{entry}}$ 为射线进入冠层的第一个有效交点参数，$t_{\text{exit}}$ 为离开冠层的最后一个有效交点参数。
 
-**新增核心方法：**
+**核心方法：**
 
-| 方法 | 功能 |
-|:---|:---|
-| `ClassifyRayHit()` | 射线击中分类：Opaque 绝对优先，非 Opaque 取最远交点 |
-| `CalculateCanopyPathLength()` | 计算光线穿过冠层的几何路径长度 $s$ |
-| `CalculateDNIExposureFactor()` | 单点有效 DNI 暴露因子计算 |
-| `CalculateDNIExposureFactorsBatch()` | 批量有效 DNI 暴露因子计算（并行） |
+| 方法 | 功能 | 状态 |
+|:---|:---|:---|
+| `CalculateRayDNITransmission()` | 计算射线穿过所有障碍物的累积 DNI 透射率 [0, 1] | **新增（2026-06-15）** |
+| `ClassifyRayHit()` | 射线击中分类（单障碍物，取最近） | **已弃用**，保留向后兼容 |
+| `CalculateCanopyPathLength()` | 计算光线穿过冠层的几何路径长度 $s$ | 不变 |
+| `CalculateDNIExposureFactor()` | 单点有效 DNI 暴露因子计算 | 内部调用 `CalculateRayDNITransmission` |
+| `CalculateDNIExposureFactorsBatch()` | 批量有效 DNI 暴露因子计算（并行） | 内部调用 `CalculateDNIExposureFactor` |
 
 ### 2.2 全 4π 球面视角系数分解
 
@@ -229,13 +244,15 @@ $$z_i = \sqrt{1 - \frac{i}{N}}, \quad i = 0, 1, \ldots, N-1$$
 |:---:|:---:|:---:|:---|
 | 0 | EPW File | Text | EPW 气象文件路径 |
 | 1 | Analysis Points | Point3d List | 地面分析点（必须位于地表 Z=0，非气象高度） |
-| 2 | Obstacle Set | Generic | **增强版（2026-06-14）**：分类障碍物设置集（ObstacleSet）。连接 ObsSet 组件。支持不透光建筑、树木冠层透射（Beer-Lambert）、半透明遮阳。向后兼容：可接受 List<Brep> 或 List<Mesh> 作为不透光障碍物（可选） |
+| 2 | Obstacle Set | Generic | **ObsSet（2026-06-15）**：仅接受 ObstacleSet 封装数据。连接 ObsSet 组件。支持不透光建筑、树木冠层透射（Beer-Lambert）、半透明遮阳。**不再接受 List<Brep>/List<Mesh> 直接输入** |
 | 3 | MRT Settings | Generic | MRT 配置设置（可选，默认新建设置） |
 | 4 | Time Settings | Generic | 模拟时间段（可选，默认全年 8760h） |
 | 5 | Air Temperature (Ta) | Number Tree | 空气温度 [°C]，支持 4 种输入模式（可选） |
 | 6 | Ground Temperature (Tg) | Number Tree | 地面温度 [°C]，支持 4 种输入模式（可选） |
 | 7 | Surrounding Surface Temp (Tsur) | Number List | 周围障碍物表面温度 [°C]（可选） |
 | 8 | Run | Boolean | 设置为 true 执行模拟 |
+
+> **重要变更（2026-06-15）：** ObsSet 输入端（索引 2）**不再向后兼容**。仅接受 ObstacleSet 类型数据，不接受 List<Brep> 或 List<Mesh>。输入几何遮挡必须通过 ObsSet 组件预处理。
 
 **Ta/Tg 输入模式：**
 
@@ -255,7 +272,7 @@ $$z_i = \sqrt{1 - \frac{i}{N}}, \quad i = 0, 1, \ldots, N-1$$
 | 2 | GVF | 地面视角系数 [0–1]，全 4π 采样 |
 | 3 | OVF | 障碍物视角系数 [0–1]，全 4π 采样 |
 | 4 | Exp | 太阳暴露因子 $f_{\text{exp}}$ [0–1]，每点每时（二值：暴露/遮挡） |
-| 5 | **DNIExp** | **新增**：有效 DNI 暴露因子 $f_{\text{DNI}}$ [0–1]，综合暴露与透射 |
+| 5 | **DNIExp** | 有效 DNI 暴露因子 $f_{\text{DNI}}$ [0–1]，综合暴露与多障碍物透射 |
 | 6 | dT_sw | 短波辐射引起的 MRT 增量 [°C] |
 | 7 | dT_lw | 长波辐射总 MRT 增量 [°C] |
 | 8 | dT_lw_sky | 天空长波分量贡献 [°C] |
@@ -293,11 +310,12 @@ $$z_i = \sqrt{1 - \frac{i}{N}}, \quad i = 0, 1, \ldots, N-1$$
 
 ### 5.1 功能说明
 
-ObsSet 组件用于创建分类障碍物设置集（`ObstacleSet`），替代 MRT 组件和 GroundSet 组件原有的平面 Brep 列表输入。通过将障碍物分类为不透光物体、树木（含冠层透射）和半透明遮阳构件，实现精细化的直接辐射（DNI）计算。
+ObsSet 组件用于创建分类障碍物设置集（`ObstacleSet`），为 MRT 组件、SpatialSoilThermalSimulator 组件和 RadSim 组件提供统一的障碍物输入。通过将障碍物分类为不透光物体、树木（含冠层透射）和半透明遮阳构件，实现精细化的直接辐射（DNI）计算。
 
-**核心原理：**
+**核心原理（2026-06-15 修正）：**
 - 当反向光线追踪的采样点被遮挡时，传统方法直接忽略该点的 DNI 贡献（$f_{\text{exp}}=0$ → DNI=0）
 - 增强版方法根据障碍物类型，通过 Beer-Lambert 定律或固定透射率计算 DNI 的部分透射
+- **物理修正**：当射线同时穿过多种非 Opaque 障碍物时，各项透射率**相乘**，而非仅取最近的一个
 - 有效 DNI 暴露因子 $f_{\text{DNI}}$ 综合暴露与透射效应，替代原 $f_{\text{exp}}$ 用于直接辐射计算
 
 ### 5.2 输入参数
@@ -315,7 +333,7 @@ ObsSet 组件用于创建分类障碍物设置集（`ObstacleSet`），替代 MR
 **典型透射率参考值：**
 
 | 材料类型 | 透射率范围 |
-|:---:|:---:|
+|:---:|:---:| 
 | 穿孔金属板 | 0.05–0.15 |
 | 遮阳织物 | 0.02–0.30 |
 | 聚碳酸酯板 (PC) | 0.60–0.85 |
@@ -325,15 +343,15 @@ ObsSet 组件用于创建分类障碍物设置集（`ObstacleSet`），替代 MR
 
 | 索引 | 参数 | 说明 |
 |:---:|:---:|:---|
-| 0 | ObsSet | 分类障碍物设置集，连接至 MRT 组件的 Obstacle Set 输入端或 GroundSet 的 ObsSet 输入端 |
+| 0 | ObsSet | 分类障碍物设置集，连接至 MRT/SpSoilSim/RadSim 组件的 ObsSet 输入端 |
 
 ### 5.4 使用注意事项
 
-1. **Tree Detail vs Tree Canopy**：Tree Detail 用于射线击中检测（判断点是否在树荫下），Tree Canopy 用于路径长度计算（光线穿过冠层的距离）。两者缺一不可，若提供了 Tree Detail 但未提供 Tree Canopy，组件会发出警告，且 DNI 透射将使用零路径长度。
+1. **Tree Detail vs Tree Canopy**：Tree Detail 用于射线击中检测（判断点是否在树荫下）和 **SVF 视野因子遮挡判断**；Tree Canopy **仅**用于 Beer-Lambert 路径长度计算（光线穿过冠层的几何距离 $s$），**不参与 SVF 遮挡**。SVF 计算仅使用 Opaque + TreeDetail + TranslucentShade 的物理遮挡，TreeCanopy 因是收缩包裹而不应作为遮挡体。两者缺一不可——若提供了 Tree Detail 但未提供 Tree Canopy，DNI 透射将使用零路径长度。
 
-2. **向后兼容**：MRT 组件和 GroundSet 组件的 Obstacle Set 输入端向后兼容，仍可接受 List<Brep> 或 List<Mesh> 作为输入（自动归类为 Opaque 不透光物体）。
+2. **严格类型要求（2026-06-15）**：MRT、SpSoilSim 和 RadSim 组件的 ObsSet 输入端**仅接受 ObstacleSet 类型数据**，不再向后兼容 List<Brep> 或 List<Mesh> 直接输入。几何遮挡必须通过 ObsSet 组件预处理。
 
-3. **Mesh 输入**：支持直接输入 Mesh 类型。若输入 Surface 或 Brep 类型，Grasshopper 可隐式转换为 Mesh。
+3. **Mesh 输入**：ObsSet 组件本身支持直接输入 Mesh 类型。若输入 Surface 或 Brep 类型，Grasshopper 可隐式转换为 Mesh。
 
 ---
 

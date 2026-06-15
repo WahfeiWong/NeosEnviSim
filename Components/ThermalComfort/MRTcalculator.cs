@@ -33,13 +33,15 @@ namespace ThermalComfort
                 "project them DOWN to ground level first before connecting here. " +
                 "The H bod parameter defines the full body height range for exposure sampling.",
                 GH_ParamAccess.list);
-            // ENHANCED (2026-06-14): ObstacleSet input replaces flat Brep list.
-            // Supports classified obstacles (opaque, tree, translucent) for fine-grained
-            // DNI transmission calculation via Beer-Lambert law.
+            // ENHANCED (2026-06-15): ObstacleSet input with strict type validation.
+            // Only accepts ObstacleSet encapsulated data. No backward compatibility for
+            // raw Brep/Mesh/Surface inputs — users must connect through ObsSet component.
             pManager.AddGenericParameter("Obstacle Set", "ObsSet",
                 "Optional: Classified obstacle set (ObstacleSet) for exposure calculation. " +
                 "Connect ObsSet component. Supports opaque buildings, trees with canopy transmission, " +
-                "and translucent sunshades. If omitted, no obstacles are considered.",
+                "and translucent sunshades. " +
+                "IMPORTANT: Only accepts ObstacleSet data type. Raw Mesh/Surface/Brep inputs are " +
+                "NOT accepted — geometry must be pre-processed through the ObsSet component.",
                 GH_ParamAccess.item);
             pManager.AddGenericParameter("MRT Settings", "MRTSet", "MRT configuration settings", GH_ParamAccess.item);
             // NEW (index 4): TimeSet moved from MRTsettings to MRT component directly
@@ -74,7 +76,7 @@ namespace ThermalComfort
                 GH_ParamAccess.list);
             pManager.AddBooleanParameter("Run", "Run", "Set to true to execute simulation", GH_ParamAccess.item, false);
 
-            pManager[2].Optional = true;  // Obstacles
+            pManager[2].Optional = true;  // Obstacles (ObsSet)
             pManager[3].Optional = true;  // MRTSet
             pManager[4].Optional = true;  // TimeSet
             pManager[5].Optional = true;  // Ta
@@ -84,6 +86,7 @@ namespace ThermalComfort
 
         protected override void RegisterOutputParams(GH_OutputParamManager pManager)
         {
+            // ---- ALL OUTPUTS UNCHANGED (requirement #5) ----
             pManager.AddNumberParameter("MRT", "MRT", "Mean Radiant Temperature [°C] for each analysis point and hour", GH_ParamAccess.tree);
             pManager.AddNumberParameter("Sky View Factor", "SVF", "Sky view factor [0-1] from full-sphere (4π) sampling for each point", GH_ParamAccess.list);
             pManager.AddNumberParameter("Ground View Factor", "GVF", "Ground view factor [0-1] from full-sphere (4π) sampling for each point", GH_ParamAccess.list);
@@ -108,12 +111,41 @@ namespace ThermalComfort
             if (!DA.GetData(0, ref epwPath)) return;
             if (!DA.GetDataList(1, analysisPoints)) return;
 
-            // ENHANCED (2026-06-14): Extract ObstacleSet from input (replaces flat Brep list)
+            // =====================================================================
+            // ENHANCED (2026-06-15): Strict ObstacleSet type validation
+            // Only accepts ObstacleSet. Raw geometry (Brep/Mesh/Surface) is rejected
+            // with a warning — users must pre-process through ObsSet component.
+            // =====================================================================
             ObstacleSet obstacleSet = null;
             GH_ObjectWrapper obsWrapper = null;
             if (DA.GetData(2, ref obsWrapper))
             {
-                if (obsWrapper?.Value is ObstacleSet os) obstacleSet = os;
+                if (obsWrapper?.Value is ObstacleSet os)
+                {
+                    obstacleSet = os;
+                }
+                else if (obsWrapper?.Value != null)
+                {
+                    // STRICT VALIDATION (2026-06-15): Reject raw geometry inputs
+                    string typeName = obsWrapper.Value.GetType().Name;
+                    if (typeName.Contains("Brep") || typeName.Contains("Mesh") || 
+                        typeName.Contains("Surface") || typeName.Contains("Geometry"))
+                    {
+                        AddRuntimeMessage(GH_RuntimeMessageLevel.Error,
+                            $"ObsSet input rejected: received raw {typeName} geometry. " +
+                            "You MUST connect the output of the 'ObsSet' component here. " +
+                            "Raw Brep/Mesh/Surface inputs are NOT accepted — geometry must be " +
+                            "pre-processed through the ObsSet component to create a classified ObstacleSet.");
+                        return;
+                    }
+                    else
+                    {
+                        AddRuntimeMessage(GH_RuntimeMessageLevel.Error,
+                            $"ObsSet input rejected: expected ObstacleSet but received {typeName}. " +
+                            "Connect the output of the 'ObsSet' component.");
+                        return;
+                    }
+                }
             }
 
             var mrtConfig = ExtractSettings<MRTConfig>(DA, 3) ?? new MRTConfig();
@@ -376,40 +408,40 @@ namespace ThermalComfort
                     "Tobs: not provided — using Ta (or EPW air temperature) as obstacle surface temperature fallback.");
             }
 
-            // ENHANCED (2026-06-14): Use ObstacleSet for classified obstacle handling.
-            // Flatten all meshes for view factor calculations that don't need classification.
-            List<Mesh> allObstacleMeshes = obstacleSet?.GetAllMeshes() ?? new List<Mesh>();
-
-            // Backward compatibility: if user provides legacy Brep list (wrapped in GH_ObjectWrapper
-            // as List<Brep> or List<Mesh>), convert them to opaque meshes in a temporary ObstacleSet.
-            if ((obstacleSet == null || !obstacleSet.HasAnyObstacles) && obsWrapper?.Value != null)
+            // =====================================================================
+            // ENHANCED (2026-06-15): Separate SVF meshes from DNI meshes.
+            // SVF uses Opaque + TreeDetail + TranslucentShade (physical occlusion).
+            // TreeCanopy is excluded from SVF — it exists only for Beer-Lambert
+            // path-length calculation in DNI transmission, not for view-factor occlusion.
+            // =====================================================================
+            List<Mesh> svfObstacleMeshes = new List<Mesh>();
+            List<Mesh> allObstacleMeshes = new List<Mesh>();
+            if (obstacleSet != null)
             {
-                if (obsWrapper.Value is List<Brep> brepList)
+                if (obstacleSet.OpaqueObjectMeshes != null)
                 {
-                    var legacyMeshes = new List<Mesh>();
-                    foreach (var brep in brepList)
-                    {
-                        if (brep == null || !brep.IsValid) continue;
-                        var meshes = Mesh.CreateFromBrep(brep, MeshingParameters.Default);
-                        if (meshes != null)
-                            foreach (var m in meshes)
-                                if (m != null && m.IsValid) legacyMeshes.Add(m);
-                    }
-                    obstacleSet = new ObstacleSet { OpaqueObjectMeshes = legacyMeshes };
-                    allObstacleMeshes = legacyMeshes;
+                    svfObstacleMeshes.AddRange(obstacleSet.OpaqueObjectMeshes);
+                    allObstacleMeshes.AddRange(obstacleSet.OpaqueObjectMeshes);
                 }
-                else if (obsWrapper.Value is List<Mesh> meshList)
+                if (obstacleSet.TreeDetailMeshes != null)
                 {
-                    obstacleSet = new ObstacleSet { OpaqueObjectMeshes = meshList };
-                    allObstacleMeshes = meshList;
+                    svfObstacleMeshes.AddRange(obstacleSet.TreeDetailMeshes);
+                    allObstacleMeshes.AddRange(obstacleSet.TreeDetailMeshes);
                 }
+                if (obstacleSet.TranslucentShadeMeshes != null)
+                {
+                    svfObstacleMeshes.AddRange(obstacleSet.TranslucentShadeMeshes);
+                    allObstacleMeshes.AddRange(obstacleSet.TranslucentShadeMeshes);
+                }
+                if (obstacleSet.TreeCanopyMeshes != null)
+                    allObstacleMeshes.AddRange(obstacleSet.TreeCanopyMeshes);
             }
 
             string obstacleInfo = obstacleSet != null && obstacleSet.HasAnyObstacles
                 ? $"ObsSet: Opaque={obstacleSet.OpaqueObjectMeshes?.Count ?? 0}, " +
-                  $"TreeDetail={obstacleSet.TreeDetailMeshes?.Count ?? 0}, " +
+                  $"TreeDet={obstacleSet.TreeDetailMeshes?.Count ?? 0}, " +
                   $"Canopy={obstacleSet.TreeCanopyMeshes?.Count ?? 0}, " +
-                  $"Translucent={obstacleSet.TranslucentShadeMeshes?.Count ?? 0}"
+                  $"TransShd={obstacleSet.TranslucentShadeMeshes?.Count ?? 0}"
                 : "No obstacles";
 
             AddRuntimeMessage(GH_RuntimeMessageLevel.Remark,
@@ -422,10 +454,10 @@ namespace ThermalComfort
             double[] groundViewFactors = new double[nPoints];
             double[] obstacleViewFactors = new double[nPoints];
 
-            if (allObstacleMeshes.Count > 0)
+            if (svfObstacleMeshes.Count > 0)
             {
                 HumanExposureModel.CalculateSphericalViewFactorsBatch(
-                    analysisPoints, allObstacleMeshes,
+                    analysisPoints, svfObstacleMeshes,
                     skyViewFactors, groundViewFactors, obstacleViewFactors,
                     mrtConfig.AnalysisHeight, mrtConfig.SVFSampleCount, mrtConfig.MaxRayDistance);
             }
@@ -505,7 +537,7 @@ namespace ThermalComfort
 
                 double solarAltitude = MRTModel.SolarAltitudeFromZenith(spaData.Zenith);
 
-                // ENHANCED (2026-06-14): Calculate both exposure factor (binary) and
+                // ENHANCED (2026-06-15): Calculate both exposure factor (binary) and
                 // DNI exposure factor (with transmission through vegetation/translucent materials)
                 double[] exposureFactors = new double[nPoints];
                 double[] dniExposureFactors = new double[nPoints];
@@ -632,9 +664,9 @@ namespace ThermalComfort
                         ObstacleEmissivity = mrtConfig.ObstacleEmissivity   // from MRT Settings
                     };
 
-                    // ENHANCED (2026-06-14): Pass dniExposureFactor to MRT calculation
+                    // ENHANCED (2026-06-15): Pass dniExposureFactor to MRT calculation
                     // for fine-grained direct radiation transmission through vegetation
-                    // and translucent materials (Beer-Lambert law).
+                    // and translucent materials (Beer-Lambert law + multi-obstacle product).
                     double mrt = MRTModel.CalculateMRT(
                         pointAirTemp,
                         record.DirectNormalRadiation,
@@ -679,7 +711,7 @@ namespace ThermalComfort
                 hourlyAvgMRT.Add(hourAvgMRT / nPoints);
             }
 
-            // Set all outputs
+            // Set all outputs (INDICES UNCHANGED)
             DA.SetDataTree(0, mrtTree);
             DA.SetDataList(1, skyViewFactors.Select(s => new GH_Number(s)).Cast<IGH_Goo>().ToList());
             DA.SetDataList(2, groundViewFactors.Select(s => new GH_Number(s)).Cast<IGH_Goo>().ToList());

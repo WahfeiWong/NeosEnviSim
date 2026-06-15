@@ -166,31 +166,118 @@ namespace ThermalComfort.Core
         }
 
         /// <summary>
-        /// Classify which type of obstacle blocks sunlight from reaching the sample point.
+        /// Calculate the cumulative DNI transmission through all non-opaque obstacles
+        /// along a ray path.
         ///
-        /// PHYSICALLY CORRECTED (2026-06-14):
-        /// Light travels from sun to ground (forward direction). The obstacle that blocks
-        /// light FIRST from the sun direction determines DNI. In backward ray tracing
-        /// (from human to sun), this is the FARTHEST intersection along the ray.
-        ///
-        /// Critical rule: Opaque objects have absolute priority. If ANY opaque mesh is
-        /// intersected by the ray, all tree/translucent obstacles behind it are in shadow
-        /// and must NOT contribute to DNI transmission.
+        /// PHYSICALLY CORRECTED (2026-06-15):
+        /// When a ray intersects multiple non-opaque obstacles, the DNI transmission
+        /// is the PRODUCT of individual transmissions, not just the nearest one from
+        /// the sun direction.
         ///
         /// Algorithm:
-        ///   1. Check all Opaque meshes — any hit → return Opaque (DNI = 0)
-        ///   2. No opaque hit → find FARTHEST Tree/Translucent hit (sun-side first)
-        ///   3. No hit at all → return None (full DNI)
+        ///   1. Check all Opaque meshes — any hit → transmission = 0 (full block)
+        ///   2. Check TreeDetail meshes — any hit → apply Beer-Lambert canopy transmission
+        ///   3. Check TranslucentShade meshes — each hit → apply fixed transmittance (multiplied)
+        ///   4. Return product of all non-opaque transmissions (1.0 if no hits)
         ///
-        /// This ensures that vegetation or translucent sunshades located in the shadow
-        /// of a building (behind it from sun's perspective) do not incorrectly transmit
-        /// DNI to the sample point.
+        /// For multiple tree hits, the total canopy path length is used (additive in exponent).
+        /// For multiple translucent hits, transmittance is multiplied for each intersected mesh.
+        /// For mixed tree + translucent, the product of both contributions is applied.
         /// </summary>
         /// <param name="ray">Ray to test (from sample point toward sun)</param>
         /// <param name="obstacleSet">Classified obstacle set</param>
         /// <param name="maxRayDistance">Maximum ray distance</param>
-        /// <param name="hitDistance">Output: distance to the blocking obstacle</param>
-        /// <returns>Type of obstacle that blocks sunlight</returns>
+        /// <returns>Cumulative DNI transmission factor [0, 1]. 0 = fully blocked, 1 = no obstruction.</returns>
+        public static double CalculateRayDNITransmission(
+            Ray3d ray,
+            ObstacleSet obstacleSet,
+            double maxRayDistance)
+        {
+            if (obstacleSet == null || !obstacleSet.HasAnyObstacles)
+                return 1.0;
+
+            // ========================================================================
+            // STEP 1: Opaque objects — ABSOLUTE PRIORITY
+            // If any opaque mesh is on the ray path, it fully blocks direct radiation.
+            // All tree/translucent obstacles behind an opaque object are in shadow.
+            // ========================================================================
+            if (obstacleSet.OpaqueObjectMeshes != null)
+            {
+                foreach (var mesh in obstacleSet.OpaqueObjectMeshes)
+                {
+                    if (mesh == null || mesh.Faces.Count == 0) continue;
+                    double tHit = Intersection.MeshRay(mesh, ray);
+                    if (tHit > 0.001 && tHit < maxRayDistance)
+                        return 0.0;
+                }
+            }
+
+            // ========================================================================
+            // STEP 2: Calculate cumulative non-opaque transmission as PRODUCT
+            // When multiple non-opaque obstacles intersect the ray, their individual
+            // DNI contributions multiply (not just taking the nearest one).
+            // ========================================================================
+            double transmission = 1.0;
+
+            // --- Tree detail hits → Beer-Lambert canopy transmission ---
+            // Any hit on TreeDetailMeshes triggers Beer-Lambert attenuation using
+            // the total geometric path length through all TreeCanopyMeshes.
+            if (obstacleSet.TreeDetailMeshes != null && obstacleSet.TreeDetailMeshes.Count > 0)
+            {
+                bool hasTreeHit = false;
+                foreach (var mesh in obstacleSet.TreeDetailMeshes)
+                {
+                    if (mesh == null || mesh.Faces.Count == 0) continue;
+                    double tHit = Intersection.MeshRay(mesh, ray);
+                    if (tHit > 0.001 && tHit < maxRayDistance)
+                    {
+                        hasTreeHit = true;
+                        break; // At least one tree hit triggers canopy attenuation
+                    }
+                }
+
+                if (hasTreeHit)
+                {
+                    double pathLength = CalculateCanopyPathLength(
+                        ray.Position, ray.Direction,
+                        obstacleSet.TreeCanopyMeshes, maxRayDistance);
+                    double treeTransmission = Math.Exp(
+                        -obstacleSet.ExtinctionCoefficient * obstacleSet.LeafAreaDensity * pathLength);
+                    transmission *= treeTransmission;
+                }
+            }
+
+            // --- Translucent shade hits → fixed transmittance per hit ---
+            // Each intersected translucent shade mesh contributes its own transmittance factor.
+            // Multiple translucent hits multiply (e.g., two shades with τ=0.5 → total τ=0.25).
+            if (obstacleSet.TranslucentShadeMeshes != null && obstacleSet.TranslucentShadeMeshes.Count > 0)
+            {
+                foreach (var mesh in obstacleSet.TranslucentShadeMeshes)
+                {
+                    if (mesh == null || mesh.Faces.Count == 0) continue;
+                    double tHit = Intersection.MeshRay(mesh, ray);
+                    if (tHit > 0.001 && tHit < maxRayDistance)
+                    {
+                        transmission *= obstacleSet.TranslucentTransmittance;
+                    }
+                }
+            }
+
+            return Math.Max(0.0, Math.Min(1.0, transmission));
+        }
+
+        /// <summary>
+        /// [LEGACY] Classify which type of obstacle blocks sunlight from reaching the sample point.
+        /// 
+        /// DEPRECATED (2026-06-15): This method is kept for backward compatibility of external callers.
+        /// For DNI transmission calculation, use <see cref="CalculateRayDNITransmission"/> instead,
+        /// which correctly handles multiple non-opaque obstacles by multiplying their individual
+        /// transmission factors.
+        /// 
+        /// When this method reports Tree or Translucent, the actual DNI contribution may be further
+        /// attenuated by other non-opaque obstacles intersected by the same ray.
+        /// </summary>
+        [Obsolete("Use CalculateRayDNITransmission for physically correct multi-obstacle DNI calculation.")]
         public static ObstacleType ClassifyRayHit(
             Ray3d ray,
             ObstacleSet obstacleSet,
@@ -204,9 +291,6 @@ namespace ThermalComfort.Core
 
             // ========================================================================
             // STEP 1: Opaque objects — ABSOLUTE PRIORITY
-            // If any opaque mesh is on the ray path, it fully blocks direct radiation.
-            // Tree/translucent obstacles behind an opaque object are in shadow and
-            // must NOT transmit DNI.
             // ========================================================================
             if (obstacleSet.OpaqueObjectMeshes != null)
             {
@@ -223,9 +307,7 @@ namespace ThermalComfort.Core
             }
 
             // ========================================================================
-            // STEP 2: No opaque on this ray. Find the FARTHEST Tree/Translucent hit.
-            // Farthest from human = closest from sun direction = first obstacle that
-            // sunlight encounters along its forward path.
+            // STEP 2: Find the farthest Tree/Translucent hit (nearest from sun)
             // ========================================================================
             ObstacleType hitType = ObstacleType.None;
             double farthestHit = -1.0;
@@ -259,9 +341,7 @@ namespace ThermalComfort.Core
             }
 
             if (hitType != ObstacleType.None)
-            {
                 hitDistance = farthestHit;
-            }
 
             return hitType;
         }
@@ -275,10 +355,8 @@ namespace ThermalComfort.Core
         ///
         /// ALGORITHM:
         /// For each sample point along body height:
-        ///   - Ray not blocked: contribution = 1.0 (full DNI)
-        ///   - Ray hits opaque object: contribution = 0.0 (no DNI)
-        ///   - Ray hits tree detail: contribution = exp(-k * LAD * s) (Beer-Lambert)
-        ///   - Ray hits translucent shade: contribution = tau (fixed transmittance)
+        ///   - Use CalculateRayDNITransmission to compute cumulative transmission
+        ///     through ALL non-opaque obstacles (product of individual transmissions)
         ///
         /// Returns the average contribution across all sample points.
         ///
@@ -291,7 +369,7 @@ namespace ThermalComfort.Core
         /// <param name="bodyHeight">Total body height [m]</param>
         /// <param name="samplePointCount">Number of vertical sample points</param>
         /// <param name="maxRayDistance">Maximum ray distance [m]</param>
-        /// <returns>Effective DNI exposure factor [0, 1] (can slightly exceed 1 if tau > 1, clamped)</returns>
+        /// <returns>Effective DNI exposure factor [0, 1]</returns>
         public static double CalculateDNIExposureFactor(
             Point3d analysisPoint,
             Vector3d sunVec,
@@ -324,41 +402,8 @@ namespace ThermalComfort.Core
                 Point3d samplePoint = new Point3d(analysisPoint.X, analysisPoint.Y, groundZ + height);
                 Ray3d ray = new Ray3d(samplePoint, sunDir);
 
-                // Classify the first obstacle hit by this ray
-                ObstacleType hitType = ClassifyRayHit(ray, obstacleSet, maxRayDistance, out double hitDist);
-
-                double contribution;
-                switch (hitType)
-                {
-                    case ObstacleType.None:
-                        // No obstacle — full DNI
-                        contribution = 1.0;
-                        break;
-
-                    case ObstacleType.Opaque:
-                        // Fully opaque — no DNI transmitted
-                        contribution = 0.0;
-                        break;
-
-                    case ObstacleType.Tree:
-                        // Beer-Lambert law through vegetation canopy
-                        double pathLength = CalculateCanopyPathLength(
-                            samplePoint, sunDir,
-                            obstacleSet.TreeCanopyMeshes, maxRayDistance);
-                        double k = obstacleSet.ExtinctionCoefficient;
-                        double lad = obstacleSet.LeafAreaDensity;
-                        contribution = Math.Exp(-k * lad * pathLength);
-                        break;
-
-                    case ObstacleType.Translucent:
-                        // Fixed transmittance for translucent materials
-                        contribution = obstacleSet.TranslucentTransmittance;
-                        break;
-
-                    default:
-                        contribution = 1.0;
-                        break;
-                }
+                // ENHANCED (2026-06-15): Use cumulative transmission product through ALL obstacles
+                double contribution = CalculateRayDNITransmission(ray, obstacleSet, maxRayDistance);
 
                 totalContribution += contribution;
             }
@@ -374,11 +419,12 @@ namespace ThermalComfort.Core
         /// directly exposed to solar radiation (binary: exposed or shaded).
         ///
         /// The DNI exposure factor (f_dni) accounts for partial transmission through
-        /// vegetation and translucent materials.
+        /// vegetation and translucent materials. When multiple non-opaque obstacles
+        /// intersect the same ray, their individual transmission factors multiply.
         ///
         /// Both values are returned for use in different parts of MRT calculation:
-        /// - f_exp: used for non-DNI purposes (if needed in future extensions)
-        /// - f_dni: used for direct radiation component in MRT
+        /// - f_exp: used for binary shading analysis
+        /// - f_dni: used for direct radiation component in MRT (physically correct)
         /// </summary>
         public static void CalculateExposureFactorsWithTransmission(
             Point3d analysisPoint,
@@ -422,34 +468,13 @@ namespace ThermalComfort.Core
                 Point3d samplePoint = new Point3d(analysisPoint.X, analysisPoint.Y, groundZ + height);
                 Ray3d ray = new Ray3d(samplePoint, sunDir);
 
-                ObstacleType hitType = ClassifyRayHit(ray, obstacleSet, maxRayDistance, out double hitDist);
+                // ENHANCED (2026-06-15): Use cumulative transmission product
+                double contribution = CalculateRayDNITransmission(ray, obstacleSet, maxRayDistance);
 
-                if (hitType == ObstacleType.None)
-                {
+                if (contribution >= 0.999) // Fully exposed (within tolerance)
                     exposedCount++;
-                    totalDNIContribution += 1.0;
-                }
-                else if (hitType == ObstacleType.Opaque)
-                {
-                    // Shaded, no DNI contribution
-                    totalDNIContribution += 0.0;
-                }
-                else if (hitType == ObstacleType.Tree)
-                {
-                    // Shaded but DNI partially transmitted through canopy
-                    double pathLength = CalculateCanopyPathLength(
-                        samplePoint, sunDir,
-                        obstacleSet.TreeCanopyMeshes, maxRayDistance);
-                    double k = obstacleSet.ExtinctionCoefficient;
-                    double lad = obstacleSet.LeafAreaDensity;
-                    double transmission = Math.Exp(-k * lad * pathLength);
-                    totalDNIContribution += transmission;
-                }
-                else if (hitType == ObstacleType.Translucent)
-                {
-                    // Shaded but DNI partially transmitted through translucent material
-                    totalDNIContribution += obstacleSet.TranslucentTransmittance;
-                }
+
+                totalDNIContribution += contribution;
             }
 
             exposureFactor = (double)samplePointCount > 0 ? (double)exposedCount / samplePointCount : 1.0;

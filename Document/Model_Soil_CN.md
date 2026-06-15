@@ -15,6 +15,8 @@
 - **SoilThermalSimulator** (`SoilSim`)：单点模拟
 - **SpatialSoilThermalSimulator** (`SpSoilSim`)：多点空间模拟，支持逐点辐射修正（SVF、精细化 DNI 暴露因子、周围反射率/发射率）
 
+**增强版（2026-06-15）：** 修正 DNI 物理模型——当射线同时与多类非 Opaque 障碍物相交时，DNI 贡献率改为多种（或多个同类）障碍物各自 DNI 贡献率的**乘积**，而非仅考虑从太阳方向最近的遮挡。SpatialSoilThermalSimulator 组件新增独立 ObsSet 输入端（索引 2），GroundSettings 组件删除 ObsSet 输入端。ObsSet 输入端**不再向后兼容**，仅接受 ObstacleSet 封装数据。
+
 **增强版（2026-06-14）：** 空间模拟器引入精细化 DNI（直接法向辐射）暴露因子计算，替代原有的二值暴露因子 $f_{\text{exp}}$。通过分类障碍物设置集（ObstacleSet）支持三种障碍物类型的差异化透射处理：不透光物体（完全阻挡）、树木（Beer-Lambert 冠层透射）、半透明遮阳构件（固定透射率），实现更精确的短波辐射计算。
 
 ---
@@ -405,43 +407,53 @@ $$GHI_{\text{actual}} = DHI \cdot SVF + DNI \cdot \sin(\alpha) \cdot f_{\text{DN
 
 $$GHI_{\text{surround}} = DHI + DNI \cdot \sin(\alpha)$$
 
-**有效 DNI 暴露因子 $f_{\text{DNI}}$（增强版，2026-06-14）：**
+**有效 DNI 暴露因子 $f_{\text{DNI}}$（增强版，2026-06-15）：**
 
-替代原有的二值暴露因子 $f_{\text{exp}}$（仅判断遮挡/未遮挡），引入有效 DNI 暴露因子 $f_{\text{DNI}}$，支持三种障碍物类型的差异化透射处理。
+替代原有的二值暴露因子 $f_{\text{exp}}$（仅判断遮挡/未遮挡），引入有效 DNI 暴露因子 $f_{\text{DNI}}$，支持三种障碍物类型的差异化透射处理。**物理修正（2026-06-15）**：当射线同时穿过多种（或多个同类）非 Opaque 障碍物时，各项透射率**相乘**，而非仅取从太阳方向最近的一个。
 
-**物理逻辑修正（2026-06-14）：** 光线从太阳射向地面（正向），代码使用反向光线追踪（从地面采样点向太阳方向发射射线）。关键物理约束：**不透光物体 (Opaque) 具有绝对遮挡优先权**——如果射线路径上存在任何不透光障碍物，其后面的树木或半透明遮阳构件均处于建筑阴影中，不应再计算 DNI 透射。
+**核心物理逻辑（修正后）：**
 
-判断逻辑（修正后）：
-1. 射线路径上**有任何不透光物体** → DNI = 0（完全阻挡）
-2. 无 Opaque 时 → 找**从太阳方向最近**的 Tree/Translucent 障碍物
-3. 全部无遮挡 → DNI = 全额
+1. **Opaque 绝对优先**：射线路径上任何 Opaque 交点 → DNI = 0（完全阻挡）
+2. **Tree 透射**：命中任何 TreeDetail → 使用总冠层路径长度计算 Beer-Lambert 透射
+3. **Translucent 透射**：命中每个 TranslucentShade Mesh → 各自乘以 $\tau$（多个相乘）
+4. **乘积法则**：所有非 Opaque 透射率相乘，结果 clamp 到 [0, 1]
 
 | 击中类型 | DNI 贡献 | 物理含义 |
 |:---:|:---:|:---|
 | 无遮挡 | 1.0 | 全额直接辐射 |
 | 不透光物体 (Opaque) | 0.0 | 完全阻挡，其后方 Tree/Translucent 均处于阴影中 |
-| 树木细节模型 (Tree) | $\exp(-k \cdot \text{LAD} \cdot s)$ | Beer-Lambert 冠层透射（仅当射线路径无 Opaque 时） |
-| 半透明遮阳构件 (Translucent) | $\tau$ | 固定透射率透射（仅当射线路径无 Opaque 时） |
+| 树木细节模型 (Tree) | $\exp(-k \cdot \text{LAD} \cdot s)$ | Beer-Lambert 冠层透射（路径长度可跨多个树冠累加） |
+| 半透明遮阳构件 (Translucent) | $\tau$ | 固定透射率（每个相交 Mesh 独立贡献，多个相乘） |
+
+**多障碍物 DNI 透射（2026-06-15 物理修正）：**
+
+当射线同时穿过多种（或多个同类）非 Opaque 障碍物时，总 DNI 透射率为各障碍物透射率的**乘积**：
+
+$$T_{\text{total}} = T_{\text{tree}} \times T_{\text{translucent,1}} \times T_{\text{translucent,2}} \times \cdots$$
+
+其中 $T_{\text{tree}} = \exp(-k \cdot \text{LAD} \cdot s_{\text{total}})$ 为穿过所有树冠的总透射率，$T_{\text{translucent},i} = \tau$ 为第 $i$ 个半透明遮阳构件的透射率。
+
+**示例：** 光线先穿过树冠（透射率 0.6），再穿过两个半透明遮阳板（透射率各 0.5）：
+
+$$T_{\text{total}} = 0.6 \times 0.5 \times 0.5 = 0.15$$
 
 植被冠层透射方程（Beer-Lambert 定律）：
 
 $$I_{\text{transmitted}} = I_{\text{DN}} \cdot \exp(-k \cdot \text{LAD} \cdot s)$$
 
 其中：
-- $s$：光线穿过树木冠层的几何路径长度 [m]，通过 `CalculateCanopyPathLength` 方法计算（射线与简化冠层模型的进出交点距离）
+- $s$：光线穿过所有树木冠层的总几何路径长度 [m]（各冠层路径长度累加）
 - $k$：消光系数 [-]，默认 0.5，典型范围 0.5–0.8（阔叶）、0.3–0.5（针叶）
 - $\text{LAD}$：叶面积密度 [m²/m³]，默认 1.0，典型范围 0.5–8.0
 - $\tau$：遮阳构件透射率 [-]，默认 0.05
 
 **计算流程（SpatialSoilThermalSimulator.cs）：**
 
-1. 从 `GroundSurfaceConfig.ObstacleSet` 读取分类障碍物设置
-2. 调用 `GetAllMeshes()` 获取全部 Mesh 用于 SVF 计算
-3. 对每个时刻、每个地面点，调用 `CalculateDNIExposureFactorsBatch()` 计算 $f_{\text{DNI}}$
+1. 从**独立 ObsSet 输入端**（索引 2）读取 ObstacleSet；若未连接，回退到 GroundSet.ObstacleSet（空默认值）
+2. 组装 SVF 专用 Mesh 列表（Opaque + TreeDetail + TranslucentShade，**不含 TreeCanopy**）用于 SVF 计算；TreeCanopy 仅用于 DNI 的 Beer-Lambert 路径长度
+3. 对每个时刻、每个地面点，调用 `CalculateDNIExposureFactorsBatch()` 计算 $f_{\text{DNI}}$（内部使用 `CalculateRayDNITransmission`，多障碍物透射率相乘）
 4. 将 $f_{\text{DNI}}$ 代入短波辐射修正公式计算 $GHI_{\text{actual}}$
 5. 修正后的 $GHI_{\text{actual}}$ 作为输入驱动 Force-Restore + Penman-Monteith 模拟
-
-**向后兼容：** 当未连接 ObsSet 组件（无障碍物分类）时，使用传统的 `CalculateExposureFactorsBatch()` 方法，$f_{\text{DNI}} = f_{\text{exp}}$。
 
 ### 10.2 修正长波辐射
 
@@ -510,17 +522,36 @@ $$L_{\text{sky}} = HIR_{\text{EPW}} \cdot SVF$$
 
 ### 11.4 地面表面设置组件（仅空间模式）
 
+**变更（2026-06-15）：** ObsSet 输入端已从此组件移除。障碍物数据请直接连接至 SpatialSoilThermalSimulator 组件的 ObsSet 输入端（索引 2）。
+
 | 端口 | 名称 | 类型 | 必填 | 说明 |
 |------|------|------|----------|-------------|
 | 0 | `GSurf` | Brep | **是** | 地面表面几何体 |
-| 1 | `ObsSet` | Generic | 否 | **增强版（2026-06-14）**：分类障碍物设置集（ObstacleSet）。连接 ObsSet 组件。支持不透光建筑、树木冠层透射（Beer-Lambert）、半透明遮阳。向后兼容：可接受 List<Brep> 或 List<Mesh> |
-| 2 | `Res` | Number | 否 | 网格分辨率 [m] |
-| 3 | `d1` | Number | 否 | 表层深度 [m] |
-| 4 | `d2` | Number | 否 | 深层深度 [m] |
-| 5 | `HExp` | Number | 否 | 暴露追踪高度 [m] |
-| 6 | `SVFN` | Integer | 否 | SVF 采样数 |
-| 7 | `RhoSur` | Number | 否 | 周围短波反射率 |
-| 8 | `EpsSur` | Number | 否 | 周围长波发射率 |
+| 1 | `Res` | Number | 否 | 网格分辨率 [m] |
+| 2 | `d1` | Number | 否 | 表层深度 [m] |
+| 3 | `d2` | Number | 否 | 深层深度 [m] |
+| 4 | `HExp` | Number | 否 | 暴露追踪高度 [m] |
+| 5 | `SVFN` | Integer | 否 | SVF 采样数 |
+| 6 | `RhoSur` | Number | 否 | 周围短波反射率 |
+| 7 | `EpsSur` | Number | 否 | 周围长波发射率 |
+
+### 11.5 SpatialSoilThermalSimulator 组件输入（仅空间模式）
+
+**变更（2026-06-15）：** 新增独立 ObsSet 输入端（索引 2），GroundSet 中不再包含 ObsSet。所有后续输入端索引依次顺延。
+
+| 索引 | 名称 | 类型 | 必填 | 说明 |
+|------|------|------|------|-------------|
+| 0 | `EPW` | Text | **是** | EPW 气象文件路径 |
+| 1 | `GroundSet` | Generic | **是** | 地面表面配置（来自 Ground Surface Settings） |
+| 2 | `ObsSet` | Generic | 否 | **新增（2026-06-15）**：分类障碍物设置集（ObstacleSet），独立输入。仅接受 ObstacleSet 类型。SVF 计算使用 Opaque + TreeDetail + TranslucentShade；TreeCanopy 不参与 SVF（仅用于 DNI 路径长度） |
+| 3 | `SoilThermSet` | Generic | **是** | 土壤热配置 |
+| 4 | `SoilSurSet` | Generic | 否 | 土壤表面配置 |
+| 5 | `SoilMoistSet` | Generic | 否 | 土壤水分配置 |
+| 6 | `T_sur` | Number | 否 | 周围表面温度 [°C] |
+| 7 | `TimeSet` | Generic | 否 | 时间范围配置 |
+| 8 | `PreHeat` | Integer | 否 | 预热时长 [h] |
+| 9 | `Folder` | Text | **是** | 输出文件夹路径 |
+| 10 | `Run` | Boolean | **是** | 运行开关 |
 
 ---
 

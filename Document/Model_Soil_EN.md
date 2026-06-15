@@ -15,6 +15,8 @@ The module provides two simulators:
 - **SoilThermalSimulator** (`SoilSim`): Single-point simulation
 - **SpatialSoilThermalSimulator** (`SpSoilSim`): Multi-point spatial simulation with per-point radiation correction (SVF, fine-grained DNI exposure factor, surrounding reflectance/emissivity)
 
+**Enhanced (2026-06-15):** Corrected DNI physics — when a ray intersects multiple non-opaque obstacle types, the DNI contribution is the **product** of individual contributions from each (or multiple same-type) obstacle, rather than considering only the nearest occlusion from the sun direction. Added independent ObsSet input (index 2) to SpatialSoilThermalSimulator; ObsSet input removed from GroundSettings. ObsSet input is **no longer backward-compatible**, only accepts ObstacleSet encapsulated data.
+
 **Enhanced (2026-06-14):** The spatial simulator introduces fine-grained Direct Normal Irradiance (DNI) exposure factor calculation, replacing the original binary exposure factor $f_{\text{exp}}$. Through the classified Obstacle Set (ObstacleSet), it supports differentiated transmission through three obstacle types: opaque objects (full block), trees (Beer-Lambert canopy transmission), and translucent sunshades (fixed transmittance), achieving more accurate shortwave radiation calculation.
 
 ---
@@ -436,12 +438,12 @@ Where:
 **Computation Pipeline (SpatialSoilThermalSimulator.cs):**
 
 1. Read classified obstacle set from `GroundSurfaceConfig.ObstacleSet`
-2. Call `GetAllMeshes()` to obtain all meshes for SVF calculation
+2. Assemble SVF-specific mesh list (Opaque + TreeDetail + TranslucentShade, **excluding TreeCanopy**) for SVF calculation; TreeCanopy is used only for Beer-Lambert path-length in DNI
 3. For each time step and each ground point, call `CalculateDNIExposureFactorsBatch()` to compute $f_{\text{DNI}}$
 4. Substitute $f_{\text{DNI}}$ into the shortwave radiation correction formula to compute $GHI_{\text{actual}}$
 5. The corrected $GHI_{\text{actual}}$ drives the Force-Restore + Penman-Monteith simulation
 
-**Backward Compatibility:** When the ObsSet component is not connected (no obstacle classification), the traditional `CalculateExposureFactorsBatch()` method is used, with $f_{\text{DNI}} = f_{\text{exp}}$.
+**ObsSet Not Connected:** When the ObsSet component is not connected (no obstacle classification), the traditional `CalculateExposureFactorsBatch()` method is used, with $f_{\text{DNI}} = f_{\text{exp}}$. **SVF Calculation Mesh Selection:** When an ObstacleSet is connected, SVF calculation uses only Opaque + TreeDetail + TranslucentShade meshes for physical occlusion. TreeCanopy meshes (simplified shrinkwrap envelopes) are **excluded from SVF** — they participate only in Beer-Lambert path-length calculation for DNI transmission.
 
 ### 10.2 Corrected Longwave
 
@@ -513,7 +515,7 @@ $$L_{\text{sky}} = HIR_{\text{EPW}} \cdot SVF$$
 | Port | Name | Type | Required | Description |
 |------|------|------|----------|-------------|
 | 0 | `GSurf` | Brep | **Yes** | Ground surface geometry |
-| 1 | `ObsSet` | Generic | No | **Enhanced (2026-06-14)**: Classified obstacle set (ObstacleSet). Connect ObsSet component. Supports opaque buildings, tree canopy transmission (Beer-Lambert), and translucent sunshades. Backward compatible: accepts List<Brep> or List<Mesh> |
+| 1 | `ObsSet` | Generic | No | **New (2026-06-15)**: Classified obstacle set (ObstacleSet), independent input. Only accepts ObstacleSet type. SVF uses Opaque + TreeDetail + TranslucentShade; TreeCanopy is excluded (DNI path-length only) |
 | 2 | `Res` | Number | No | Mesh resolution [m] |
 | 3 | `d1` | Number | No | Top layer depth [m] |
 | 4 | `d2` | Number | No | Deep layer depth [m] |

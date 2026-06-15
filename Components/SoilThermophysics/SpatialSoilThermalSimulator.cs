@@ -28,7 +28,8 @@ namespace SoilThermophysics
     ///   6. Parallel Force-Restore + Penman-Monteith single-source simulation per point
     ///
     /// Integrated inputs:
-    ///   - GroundSet: encapsulates mesh, points, d1, d2, HExp, SVFN, RhoSur, EpsSur, Obst meshes
+    ///   - GroundSet: encapsulates mesh, points, d1, d2, HExp, SVFN, RhoSur, EpsSur
+    ///   - ObsSet: classified obstacles for fine-grained DNI transmission (NEW 2026-06-15)
     ///   - WindCfg: flexible wind speed (EPW / single / per-point / time-series / full 2D)
     ///
     /// Time range support:
@@ -39,14 +40,15 @@ namespace SoilThermophysics
     /// Input order (required first, then by category, Folder penultimate, Run last):
     ///   0 EPW        Weather file path              (required)
     ///   1 GroundSet  Ground surface config          (required)
-    ///   2 SoilThermSet  Soil thermal config            (required)
-    ///   3 SoilSurSet Surface aerodynamic config    (optional)
-    ///   4 SoilMoistSet Moisture config              (optional)
-    ///   5 T_sur      Surround surface temp           (optional, -999=use EPW air temp)
-    ///   6 TimeSet    Time range config              (optional)
-    ///   7 PreHeat    Pre-heat duration [h]          (optional, default 24)
-    ///   8 Folder     Output folder path             (penultimate)
-    ///   9 Run        Execution toggle               (last)
+    ///   2 ObsSet     Classified obstacle set        (optional, NEW 2026-06-15)
+    ///   3 SoilThermSet  Soil thermal config         (required)
+    ///   4 SoilSurSet Surface aerodynamic config     (optional)
+    ///   5 SoilMoistSet Moisture config              (optional)
+    ///   6 T_sur      Surround surface temp          (optional, -999=use EPW air temp)
+    ///   7 TimeSet    Time range config              (optional)
+    ///   8 PreHeat    Pre-heat duration [h]          (optional, default 24)
+    ///   9 Folder     Output folder path             (penultimate)
+    ///  10 Run        Execution toggle               (last)
     /// </summary>
     public class SpatialSoilThermalSimulatorComponent : GH_Component
     {
@@ -54,7 +56,8 @@ namespace SoilThermophysics
           : base("Spatial Soil Thermal Simulator", "SpSoilSim",
               "Spatial soil temperature and latent heat simulation at multiple points " +
               "with per-point radiation correction (SVF, solar exposure, surround reflectance). " +
-              "Integrated GroundSet for geometry/environment/obstacle params. " +
+              "Integrated GroundSet for geometry/environment params. " +
+              "Independent ObsSet input for classified obstacle DNI transmission (Beer-Lambert). " +
               "Flexible wind speed input via separate WindCfg port. " +
               "Supports optional time range filtering with automatic pre-heat.",
               "Neos", "Thermophysics")
@@ -67,12 +70,24 @@ namespace SoilThermophysics
             pManager.AddTextParameter("EPW Path", "EPW",
                 "Path to EPW weather file", GH_ParamAccess.item);
 
-            // ---- Required: Ground Set (geometry + environment + obstacles) ----
+            // ---- Required: Ground Set (geometry + environment) ----
             pManager.AddGenericParameter("Ground Set", "GroundSet",
                 "Ground surface configuration (from Ground Surface Settings). " +
                 "Encapsulates mesh, analysis points, layer depths, HExp, SVFN, " +
-                "surround reflectance/emissivity, and obstacle meshes.",
+                "surround reflectance/emissivity.",
                 GH_ParamAccess.item);
+
+            // ---- NEW (2026-06-15): Independent ObsSet input ----
+            // Previously ObsSet was passed through GroundSet. Now it is a separate input
+            // for better modularity and consistent data flow across all simulator components.
+            pManager.AddGenericParameter("Obstacle Set", "ObsSet",
+                "Optional: Classified obstacle set (ObstacleSet) for fine-grained DNI transmission. " +
+                "Connect ObsSet component. Supports opaque buildings, trees with Beer-Lambert canopy " +
+                "transmission, and translucent sunshades. " +
+                "IMPORTANT: Only accepts ObstacleSet data type. Raw Mesh/Surface/Brep inputs are " +
+                "NOT accepted — geometry must be pre-processed through the ObsSet component.",
+                GH_ParamAccess.item);
+            pManager[2].Optional = true;
 
             // ---- Required: Soil Thermal config ----
             pManager.AddGenericParameter("Soil Thermal Set", "SoilThermSet",
@@ -83,38 +98,38 @@ namespace SoilThermophysics
                 "Surface aerodynamic configuration (from Soil Surface Settings). " +
                 "Contains z0, ra bounds, stability correction, AND wind speed override settings.",
                 GH_ParamAccess.item);
-            pManager[3].Optional = true;
+            pManager[4].Optional = true;
 
             // ---- Optional: Soil Moisture config ----
             pManager.AddGenericParameter("Soil Moisture Set", "SoilMoistSet",
                 "Soil moisture configuration (optional, from Soil Moisture Settings)", GH_ParamAccess.item);
-            pManager[4].Optional = true;
+            pManager[5].Optional = true;
 
             // ---- Optional: Surround surface temperature override ----
             pManager.AddNumberParameter("Surround Temp", "T_sur",
                 "Surrounding surface temperature [C] for longwave correction. " +
                 "If not provided, air temperature from EPW is used (may underestimate in urban areas).",
                 GH_ParamAccess.item);
-            pManager[5].Optional = true;
+            pManager[6].Optional = true;
 
             // ---- Optional: Time range config ----
             pManager.AddGenericParameter("Time Settings", "TimeSet",
                 "Optional: time period configuration (from Time Settings component). " +
                 "If not provided, full-year simulation is performed.",
                 GH_ParamAccess.item);
-            pManager[6].Optional = true;
+            pManager[7].Optional = true;
 
             // ---- Optional: Pre-heat duration ----
             pManager.AddIntegerParameter("Pre-heat Hours", "PreHeat",
                 "Pre-heat duration in hours for non-full-year simulation (default 2). " +
                 "Only effective when TimeSet is connected. Results during pre-heat are discarded.",
                 GH_ParamAccess.item, 2);
-            pManager[7].Optional = true;
+            pManager[8].Optional = true;
 
             // Output folder
             pManager.AddTextParameter("Output Folder", "Folder",
                 "Folder path for saving spatial simulation results", GH_ParamAccess.item);
-            pManager[8].Optional = true;
+            pManager[9].Optional = true;
 
             // Run toggle
             pManager.AddBooleanParameter("Run", "Run",
@@ -123,6 +138,7 @@ namespace SoilThermophysics
 
         protected override void RegisterOutputParams(GH_OutputParamManager pManager)
         {
+            // ---- ALL OUTPUTS UNCHANGED (requirement #5) ----
             pManager.AddGenericParameter("Spatial Result", "Result",
                 "Spatial simulation result object", GH_ParamAccess.item);
             pManager.AddTextParameter("Log", "Log",
@@ -141,9 +157,9 @@ namespace SoilThermophysics
 
             try
             {
-                // ---- Last (9): Check Run toggle ----
+                // ---- Last (10): Check Run toggle ----
                 bool run = false;
-                DA.GetData(9, ref run);
+                DA.GetData(10, ref run);
                 if (!run)
                 {
                     logs.Add("Simulation paused. Set 'Run' to true to execute.");
@@ -171,7 +187,7 @@ namespace SoilThermophysics
                     return;
                 }
 
-                // ---- 1: Ground Set (geometry + environment + obstacles) ----
+                // ---- 1: Ground Set (geometry + environment, NO LONGER contains ObsSet) ----
                 var groundConfig = ExtractConfig<GroundSurfaceConfig>(DA, 1);
                 if (groundConfig == null)
                 {
@@ -195,13 +211,82 @@ namespace SoilThermophysics
                 double topLayerDepth = groundConfig.TopLayerDepth;
                 double deepLayerDepth = groundConfig.DeepLayerDepth;
 
-                // ENHANCED (2026-06-14): Use ObstacleSet for classified obstacle handling.
-                // Flatten all meshes for SVF calculations that don't need classification.
-                var obstacleSet = groundConfig.ObstacleSet;
-                List<Mesh> allObstacleMeshes = obstacleSet?.GetAllMeshes() ?? new List<Mesh>();
+                // =====================================================================
+                // NEW (2026-06-15): Independent ObsSet input (index 2)
+                // With strict type validation. Only accepts ObstacleSet.
+                // =====================================================================
+                ObstacleSet obstacleSet = null;
+                GH_ObjectWrapper obsWrapper = null;
+                if (DA.GetData(2, ref obsWrapper))
+                {
+                    if (obsWrapper?.Value is ObstacleSet os)
+                    {
+                        obstacleSet = os;
+                    }
+                    else if (obsWrapper?.Value != null)
+                    {
+                        // STRICT VALIDATION: Reject raw geometry inputs
+                        string typeName = obsWrapper.Value.GetType().Name;
+                        if (typeName.Contains("Brep") || typeName.Contains("Mesh") ||
+                            typeName.Contains("Surface") || typeName.Contains("Geometry"))
+                        {
+                            AddRuntimeMessage(GH_RuntimeMessageLevel.Error,
+                                $"ObsSet input rejected: received raw {typeName} geometry. " +
+                                "You MUST connect the output of the 'ObsSet' component here. " +
+                                "Raw Brep/Mesh/Surface inputs are NOT accepted.");
+                            return;
+                        }
+                        else
+                        {
+                            AddRuntimeMessage(GH_RuntimeMessageLevel.Error,
+                                $"ObsSet input rejected: expected ObstacleSet but received {typeName}. " +
+                                "Connect the output of the 'ObsSet' component.");
+                            return;
+                        }
+                    }
+                }
 
-                // ---- 2: Soil Thermal config ----
-                var soilConfig = ExtractConfig<SoilThermalConfig>(DA, 2);
+                // Fallback: if no independent ObsSet connected, try GroundSet.ObstacleSet
+                // for transitional compatibility. GroundSet no longer receives ObsSet from
+                // GroundSettings, but this fallback preserves compatibility with custom GroundSet sources.
+                if (obstacleSet == null && groundConfig.ObstacleSet != null && groundConfig.ObstacleSet.HasAnyObstacles)
+                {
+                    obstacleSet = groundConfig.ObstacleSet;
+                    logs.Add("NOTE: Using ObstacleSet from GroundSet (legacy path). " +
+                             "Consider connecting ObsSet directly to the SpSoilSim component.");
+                }
+
+                // =====================================================================
+                // ENHANCED (2026-06-15): Separate SVF meshes from DNI meshes.
+                // SVF uses Opaque + TreeDetail + TranslucentShade (physical occlusion).
+                // TreeCanopy is excluded from SVF — it exists only for Beer-Lambert
+                // path-length calculation in DNI transmission, not for view-factor occlusion.
+                // =====================================================================
+                List<Mesh> svfObstacleMeshes = new List<Mesh>();
+                List<Mesh> allObstacleMeshes = new List<Mesh>();
+                if (obstacleSet != null)
+                {
+                    if (obstacleSet.OpaqueObjectMeshes != null)
+                    {
+                        svfObstacleMeshes.AddRange(obstacleSet.OpaqueObjectMeshes);
+                        allObstacleMeshes.AddRange(obstacleSet.OpaqueObjectMeshes);
+                    }
+                    if (obstacleSet.TreeDetailMeshes != null)
+                    {
+                        svfObstacleMeshes.AddRange(obstacleSet.TreeDetailMeshes);
+                        allObstacleMeshes.AddRange(obstacleSet.TreeDetailMeshes);
+                    }
+                    if (obstacleSet.TranslucentShadeMeshes != null)
+                    {
+                        svfObstacleMeshes.AddRange(obstacleSet.TranslucentShadeMeshes);
+                        allObstacleMeshes.AddRange(obstacleSet.TranslucentShadeMeshes);
+                    }
+                    if (obstacleSet.TreeCanopyMeshes != null)
+                        allObstacleMeshes.AddRange(obstacleSet.TreeCanopyMeshes);
+                }
+
+                // ---- 3: Soil Thermal config (was index 2, now index 3) ----
+                var soilConfig = ExtractConfig<SoilThermalConfig>(DA, 3);
                 if (soilConfig == null)
                 {
                     AddRuntimeMessage(GH_RuntimeMessageLevel.Error, "SoilThSet required. Connect Soil Temperature Settings' output.");
@@ -212,30 +297,28 @@ namespace SoilThermophysics
                 soilConfig.TopLayerDepth = topLayerDepth;
                 soilConfig.DeepLayerDepth = deepLayerDepth;
 
-                // ---- 3: Soil Surface config (optional, includes wind speed) ----
-                var surfConfig = ExtractConfig<SoilSurfaceConfig>(DA, 3) ?? new SoilSurfaceConfig();
-                // Wind speed config is now encapsulated within SoilSurfaceConfig
-                // (no separate WindCfg port needed since SoilSurfSet refactoring)
+                // ---- 4: Soil Surface config (was index 3, now index 4) ----
+                var surfConfig = ExtractConfig<SoilSurfaceConfig>(DA, 4) ?? new SoilSurfaceConfig();
                 WindSpeedConfig windConfig = surfConfig.WindSpeedConfig;
 
-                // ---- 4: Soil Moisture config (optional) ----
-                var moistConfig = ExtractConfig<SoilMoistureConfig>(DA, 4) ?? new SoilMoistureConfig();
+                // ---- 5: Soil Moisture config (was index 4, now index 5) ----
+                var moistConfig = ExtractConfig<SoilMoistureConfig>(DA, 5) ?? new SoilMoistureConfig();
 
-                // ---- 5: Surround temperature override (optional) ----
+                // ---- 6: Surround temperature override (was index 5, now index 6) ----
                 double surroundTempOverride = -999;
-                DA.GetData(5, ref surroundTempOverride);
+                DA.GetData(6, ref surroundTempOverride);
 
-                // ---- 6: TimeSet (optional) ----
+                // ---- 7: TimeSet (was index 6, now index 7) ----
                 SimulationTimeConfig timeConfig = null;
                 GH_ObjectWrapper timeWrapper = null;
-                if (DA.GetData(6, ref timeWrapper) && timeWrapper?.Value is SimulationTimeConfig tc)
+                if (DA.GetData(7, ref timeWrapper) && timeWrapper?.Value is SimulationTimeConfig tc)
                 {
                     timeConfig = tc;
                 }
 
-                // ---- 7: Pre-heat duration (optional, default 24) ----
+                // ---- 8: Pre-heat duration (was index 7, now index 8) ----
                 int preHeatHours = 24;
-                DA.GetData(7, ref preHeatHours);
+                DA.GetData(8, ref preHeatHours);
                 preHeatHours = Math.Max(0, preHeatHours);  // ensure non-negative
 
                 // Determine simulation time range
@@ -275,9 +358,9 @@ namespace SoilThermophysics
                     logs.Add($"Total hours: {nHoursTotal}");
                 }
 
-                // ---- 8: Output Folder ----
+                // ---- 9: Output Folder (was index 8, now index 9) ----
                 string folder = "";
-                if (!DA.GetData(8, ref folder)) return;
+                if (!DA.GetData(9, ref folder)) return;
                 if (!Directory.Exists(folder)) Directory.CreateDirectory(folder);
 
                 int nPts = analysisPoints.Count;
@@ -289,7 +372,7 @@ namespace SoilThermophysics
                       $"TreeDet={obstacleSet.TreeDetailMeshes?.Count ?? 0}, " +
                       $"Canopy={obstacleSet.TreeCanopyMeshes?.Count ?? 0}, " +
                       $"TransShd={obstacleSet.TranslucentShadeMeshes?.Count ?? 0}"
-                    : $"Obstacles: {allObstacleMeshes.Count} (legacy)";
+                    : "Obstacles: None";
 
                 logs.Add($"=== Spatial Soil Thermal Simulator ===");
                 logs.Add($"Points: {nPts}, {obsLog}");
@@ -354,12 +437,12 @@ namespace SoilThermophysics
                 // Phase 1: SVF (ground-level sky view factor)
                 // =====================================================================
                 var svf = new double[nPts];
-                if (allObstacleMeshes.Count > 0)
+                if (svfObstacleMeshes.Count > 0)
                 {
                     Parallel.For(0, nPts, i =>
                     {
                         svf[i] = HumanExposureModel.CalculateSkyViewFactorForPoint(
-                            analysisPoints[i], allObstacleMeshes, exposureHeight, svfSampleCount);
+                            analysisPoints[i], svfObstacleMeshes, exposureHeight, svfSampleCount);
                     });
                     logs.Add($"SVF range: [{svf.Min():F3}, {svf.Max():F3}] (avg={svf.Average():F3})");
                 }
@@ -412,11 +495,12 @@ namespace SoilThermophysics
                 logs.Add("Solar position pre-computation complete.");
 
                 // =====================================================================
-                // Phase 3: Ground-level DNI exposure factor calculation (ENHANCED 2026-06-14)
+                // Phase 3: Ground-level DNI exposure factor calculation (ENHANCED 2026-06-15)
                 // Uses classified ObstacleSet with fine-grained DNI transmission:
                 //   - Opaque: DNI = 0 (full block)
                 //   - Tree: DNI * exp(-k * LAD * s) (Beer-Lambert canopy transmission)
                 //   - Translucent: DNI * tau (fixed transmittance)
+                //   - Multiple non-opaque obstacles: PRODUCT of individual transmissions
                 // Ground level: bodyHeight = 0, sampleCount = 1 (single ray per point)
                 // =====================================================================
                 var dniExposureFactors = new double[nPts, nHoursTotal];
@@ -439,7 +523,9 @@ namespace SoilThermophysics
 
                     if (obstacleSet != null && obstacleSet.HasAnyObstacles)
                     {
-                        // ENHANCED: Use ObstacleSet with Beer-Lambert transmission
+                        // ENHANCED (2026-06-15): Use ObstacleSet with cumulative transmission product
+                        // CalculateRayDNITransmission correctly handles multiple non-opaque obstacles
+                        // by multiplying their individual transmission factors.
                         double[] batch = HumanExposureModel.CalculateDNIExposureFactorsBatch(
                             analysisPoints, sunVec, obstacleSet,
                             groundLevelBodyHeight, groundLevelSamplePoints, maxRayDistance);
@@ -465,7 +551,7 @@ namespace SoilThermophysics
                     }
                 }
 
-                logs.Add("Ground-level DNI exposure computation complete (with obstacle transmission).");
+                logs.Add("Ground-level DNI exposure computation complete (with multi-obstacle transmission product).");
 
                 // =====================================================================
                 // Phase 4: Initialize models
@@ -519,12 +605,12 @@ namespace SoilThermophysics
                     Parallel.For(0, nPts, new ParallelOptions
                     { MaxDegreeOfParallelism = Math.Max(1, Environment.ProcessorCount - 1) }, pIdx =>
                     {
-                        // Per-point corrected SHORTWAVE (ENHANCED 2026-06-14)
+                        // Per-point corrected SHORTWAVE (ENHANCED 2026-06-15)
                         // dniExposureFactors accounts for transmission through vegetation
-                        // (Beer-Lambert) and translucent materials.
+                        // (Beer-Lambert) and translucent materials, with multi-obstacle product.
                         double diffuseActual = dhi * svf[pIdx];
                         double directHorizontal = dni * sinAlt * dniExposureFactors[pIdx, hoy];
-                        // FIX (P0): Surround GHI assumes open horizontal ground (SVF=1, no shading).
+                        // Surround GHI assumes open horizontal ground (SVF=1, no shading).
                         // Correct formula: GHI_surround = DHI + DNI*sin(alt) for open horizontal surface
                         double ghiSurround = dhi + dni * sinAlt;
                         double reflectedActual = surroundReflectance * ghiSurround * (1.0 - svf[pIdx]);
@@ -540,7 +626,6 @@ namespace SoilThermophysics
                         double effectiveTair = airTempOverride > -273.15 ? airTempOverride : tAir;
 
                         // Per-point corrected LONGWAVE
-                        // FIX (P2): Use independent surround temperature if provided, else EPW air temp
                         double lSky = lDownEpw * svf[pIdx];
                         double surroundTempC = (surroundTempOverride > -273.0)
                             ? surroundTempOverride   // User-specified surround temperature
@@ -636,6 +721,7 @@ namespace SoilThermophysics
                     }
                 logs.Add($"Tg range: [{minOverall:F1}, {maxOverall:F1}] C");
 
+                // ---- ALL OUTPUT INDICES UNCHANGED ----
                 DA.SetData(0, new GH_ObjectWrapper(result));
                 DA.SetDataList(1, logs);
                 DA.SetDataList(2, allET.Select(e => e.Sum()).ToList());
@@ -676,9 +762,6 @@ namespace SoilThermophysics
 
         private double EstimateAnnualMean(EPWData epw)
         {
-            // FIX (P2): Use full-year average (all EPW hours) instead of first 168 hours.
-            // Previous version used only the first week (Jan 1-7), causing systematic
-            // cold bias for Northern Hemisphere sites (~5-15°C error).
             int samples = epw.HourCount;
             if (samples == 0) return 15.0;
             double sum = 0.0;

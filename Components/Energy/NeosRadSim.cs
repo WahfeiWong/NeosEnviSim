@@ -3,6 +3,7 @@ using Grasshopper.Kernel;
 using Grasshopper.Kernel.Types;
 using SolarPV.Core;
 using Common.Core;
+using ThermalComfort.Core;
 using NeosEnviSim.Properties;
 using Rhino.Geometry;
 using Rhino.Geometry.Intersect;
@@ -31,6 +32,12 @@ namespace SolarPV
     ///
     /// Results are saved to an output folder in 6 categorized files.
     ///
+    /// ENHANCED (2026-06-15): Obs input changed from Brep List to ObstacleSet (ObsSet) for
+    /// fine-grained DNI transmission calculation, consistent with SpatialSoilThermalSimulator
+    /// and Outdoor MRT components. When a ray intersects multiple non-opaque obstacles,
+    /// individual DNI transmission factors multiply (Beer-Lambert for trees, fixed tau for
+    /// translucent shades). ObsSet input only accepts ObstacleSet type; raw geometry is rejected.
+    ///
     /// History:
     /// - 2024-05-03: Original PVSimulator fixes (Perez SVF, per-face temperature, shadow ray offset, IAM, nighttime AC, stratified SVF, leap year)
     /// - 2025-05-04: P1-P11 fixes (Perez fallback, Voc protection, NOCT correction, ref modulesPerString, bifacial warning, etc.)
@@ -38,6 +45,7 @@ namespace SolarPV
     /// - 2026-05-05: Renamed to NeosRadSim. Added sunshine duration, obstacle view factor, per-face hourly radiation,
     ///              categorized file outputs, 6 reader components.
     /// - 2026-05-22: Unified mesh generation via Geometry.Core (Rhino gridded meshing, aligns with Ladybug LB Generate Point Grid).
+    /// - 2026-06-15: Obs input changed to ObstacleSet (ObsSet) with fine-grained DNI transmission (product of multi-obstacle transmissions).
     /// </summary>
     public class NeosRadSim : GH_Component
     {
@@ -45,6 +53,7 @@ namespace SolarPV
           : base("RadSim", "RadSim",
               "Universal radiation simulation core using EPW data, NREL-SPA solar positioning, " +
               "backward raytracing shading analysis, anisotropic sky models, bifacial modules, and inverter MPPT(Maximum Power Point Tracking) modeling. " +
+              "ObsSet input for fine-grained DNI transmission (Beer-Lambert). " +
               "Results are saved to categorized files for downstream components.",
               "Neos", "RadSim")
         {
@@ -53,7 +62,18 @@ namespace SolarPV
         protected override void RegisterInputParams(GH_InputParamManager pManager)
         {
             pManager.AddTextParameter("EPW File", "EPW", "Path to EPW weather file", GH_ParamAccess.item);
-            pManager.AddBrepParameter("Obstacles", "Obs", "Context geometry / obstacles as Breps", GH_ParamAccess.list);
+
+            // === ENHANCED (2026-06-15): Obs changed from Brep List to ObstacleSet (ObsSet) ===
+            pManager.AddGenericParameter("Obstacle Set", "ObsSet",
+                "Optional: Classified obstacle set (ObstacleSet) for fine-grained DNI transmission. " +
+                "Connect ObsSet component. Supports opaque buildings (full block), trees " +
+                "(Beer-Lambert canopy transmission exp(-k*LAD*s)), and translucent sunshades (fixed tau). " +
+                "When multiple non-opaque obstacles intersect the same ray, their individual " +
+                "transmission factors multiply for physically correct DNI attenuation. " +
+                "IMPORTANT: Only accepts ObstacleSet data type. Raw Mesh/Surface/Brep inputs are " +
+                "NOT accepted -- geometry must be pre-processed through the ObsSet component.",
+                GH_ParamAccess.item);
+
             pManager.AddBrepParameter("Measurement Surfaces", "MS", "Sensor placement Surfaces or Breps (will be meshed)", GH_ParamAccess.list);
 
             pManager.AddGenericParameter("Time Settings", "TimeSet",
@@ -76,7 +96,7 @@ namespace SolarPV
 
             for (int i = 3; i <= 8; i++)
                 pManager[i].Optional = true;
-            pManager[1].Optional = true;
+            pManager[1].Optional = true;  // ObsSet
             pManager[9].Optional = true;
         }
 
@@ -99,13 +119,11 @@ namespace SolarPV
         protected override void SolveInstance(IGH_DataAccess DA)
         {
             string epwPath = "";
-            List<Brep> obstacles = new List<Brep>();
             List<Brep> pvPanels = new List<Brep>();
             string outputFolder = "";
             bool run = false;
 
             if (!DA.GetData(0, ref epwPath)) return;
-            DA.GetDataList(1, obstacles);
             if (!DA.GetDataList(2, pvPanels)) return;
             DA.GetData(9, ref outputFolder);
             DA.GetData(10, ref run);
@@ -122,6 +140,63 @@ namespace SolarPV
                 outputFolder = Path.Combine(Path.GetTempPath(), "NeosRadSim_Results", Guid.NewGuid().ToString("N").Substring(0, 8));
                 AddRuntimeMessage(GH_RuntimeMessageLevel.Remark,
                     $"No output folder specified. Using temporary: {outputFolder}");
+            }
+
+            // =====================================================================
+            // 1: ObstacleSet (ENHANCED 2026-06-15)
+            // Strict type validation. Only accepts ObstacleSet.
+            // Raw Brep/Mesh/Surface inputs are rejected with an error.
+            // =====================================================================
+            ObstacleSet obstacleSet = null;
+            List<Mesh> obstacleMeshes = new List<Mesh>();
+            List<Mesh> svfObstacleMeshes = new List<Mesh>();
+            GH_ObjectWrapper obsWrapper = null;
+            if (DA.GetData(1, ref obsWrapper))
+            {
+                if (obsWrapper?.Value is ObstacleSet os)
+                {
+                    obstacleSet = os;
+                    // SVF meshes: Opaque + TreeDetail + TranslucentShade (no TreeCanopy)
+                    // TreeCanopy is for Beer-Lambert path-length only, not SVF occlusion.
+                    if (obstacleSet.OpaqueObjectMeshes != null)
+                    {
+                        svfObstacleMeshes.AddRange(obstacleSet.OpaqueObjectMeshes);
+                        obstacleMeshes.AddRange(obstacleSet.OpaqueObjectMeshes);
+                    }
+                    if (obstacleSet.TreeDetailMeshes != null)
+                    {
+                        svfObstacleMeshes.AddRange(obstacleSet.TreeDetailMeshes);
+                        obstacleMeshes.AddRange(obstacleSet.TreeDetailMeshes);
+                    }
+                    if (obstacleSet.TranslucentShadeMeshes != null)
+                    {
+                        svfObstacleMeshes.AddRange(obstacleSet.TranslucentShadeMeshes);
+                        obstacleMeshes.AddRange(obstacleSet.TranslucentShadeMeshes);
+                    }
+                    if (obstacleSet.TreeCanopyMeshes != null)
+                        obstacleMeshes.AddRange(obstacleSet.TreeCanopyMeshes);
+                }
+                else if (obsWrapper?.Value != null)
+                {
+                    string typeName = obsWrapper.Value.GetType().Name;
+                    if (typeName.Contains("Brep") || typeName.Contains("Mesh") ||
+                        typeName.Contains("Surface") || typeName.Contains("Geometry"))
+                    {
+                        AddRuntimeMessage(GH_RuntimeMessageLevel.Error,
+                            $"ObsSet input rejected: received raw {typeName} geometry. " +
+                            "You MUST connect the output of the 'ObsSet' component here. " +
+                            "Raw Brep/Mesh/Surface inputs are NOT accepted -- geometry must be " +
+                            "pre-processed through the ObsSet component.");
+                        return;
+                    }
+                    else
+                    {
+                        AddRuntimeMessage(GH_RuntimeMessageLevel.Error,
+                            $"ObsSet input rejected: expected ObstacleSet but received {typeName}. " +
+                            "Connect the output of the 'ObsSet' component.");
+                        return;
+                    }
+                }
             }
 
             var timeConfig = ExtractSettings<SimulationTimeConfig>(DA, 3) ?? new SimulationTimeConfig();
@@ -180,11 +255,14 @@ namespace SolarPV
             endHoy = Math.Max(0, Math.Min(epwData.HourCount - 1, endHoy));
             if (startHoy > endHoy) { int tmp = startHoy; startHoy = endHoy; endHoy = tmp; }
 
-            // Convert obstacles to meshes using Geometry.Core
-            List<Mesh> obstacleMeshes = BrepMeshing.ConvertBrepsToMeshes(obstacles);
+            string obsInfo = obstacleSet != null && obstacleSet.HasAnyObstacles
+                ? $"ObsSet: Opaque={obstacleSet.OpaqueObjectMeshes?.Count ?? 0}, " +
+                  $"TreeDet={obstacleSet.TreeDetailMeshes?.Count ?? 0}, " +
+                  $"Canopy={obstacleSet.TreeCanopyMeshes?.Count ?? 0}, " +
+                  $"TransShd={obstacleSet.TranslucentShadeMeshes?.Count ?? 0}"
+                : $"Obstacle meshes: {obstacleMeshes.Count}";
 
-            AddRuntimeMessage(GH_RuntimeMessageLevel.Remark,
-                $"Obstacles: {obstacleMeshes.Count} mesh objects");
+            AddRuntimeMessage(GH_RuntimeMessageLevel.Remark, obsInfo);
 
             List<Mesh> pvMeshes = new List<Mesh>();
             List<List<FaceData>> allFaceData = new List<List<FaceData>>();
@@ -308,12 +386,14 @@ namespace SolarPV
 
             // Calculate Sky View Factors
             AddRuntimeMessage(GH_RuntimeMessageLevel.Remark, "Calculating Sky View Factors...");
-            CalculateSVF(allFaceData, obstacleMeshes, pvMeshes, rayConfig.SVFSampleCount, rayConfig.SVFRayOffset);
+            // ENHANCED (2026-06-15): SVF uses Opaque + TreeDetail + TranslucentShade only.
+            // TreeCanopy is excluded — it exists only for Beer-Lambert path-length in DNI.
+            CalculateSVF(allFaceData, svfObstacleMeshes, pvMeshes, rayConfig.SVFSampleCount, rayConfig.SVFRayOffset);
 
             if (pvConfig.EnableBifacial)
             {
                 AddRuntimeMessage(GH_RuntimeMessageLevel.Remark, "Calculating rear-side Sky View Factors...");
-                CalculateRearSVF(allFaceData, obstacleMeshes, pvMeshes, rayConfig.SVFSampleCount, rayConfig.SVFRayOffset);
+                CalculateRearSVF(allFaceData, svfObstacleMeshes, pvMeshes, rayConfig.SVFSampleCount, rayConfig.SVFRayOffset);
             }
 
             int numHours = endHoy - startHoy + 1;
@@ -343,6 +423,22 @@ namespace SolarPV
 
             int fixedModulesPerString = invConfig.ModulesPerString;
             double timeStepHours = epwData.TimeStepHours;
+
+            // =====================================================================
+            // Pre-compute all face centers for batch DNI exposure calculation
+            // =====================================================================
+            var allFaceCenters = new List<Point3d>();
+            var faceIndexToPanel = new List<int>(); // map flat face index -> panel index
+            var faceIndexToLocal = new List<int>(); // map flat face index -> local face index
+            for (int panelIdx = 0; panelIdx < allFaceData.Count; panelIdx++)
+            {
+                for (int faceIdx = 0; faceIdx < allFaceData[panelIdx].Count; faceIdx++)
+                {
+                    allFaceCenters.Add(allFaceData[panelIdx][faceIdx].Center);
+                    faceIndexToPanel.Add(panelIdx);
+                    faceIndexToLocal.Add(faceIdx);
+                }
+            }
 
             // Main simulation loop
             for (int hoy = startHoy; hoy <= endHoy; hoy++)
@@ -456,41 +552,71 @@ namespace SolarPV
                 sunVectors.Add(sunVec);
                 analyzedHours.Add(hoy);
 
+                // =====================================================================
+                // ENHANCED (2026-06-15): Batch DNI exposure factor calculation
+                // Uses ObstacleSet with fine-grained transmission:
+                //   - Opaque: transmission = 0
+                //   - Tree: Beer-Lambert canopy transmission
+                //   - Translucent: fixed tau per mesh (multiple multiply)
+                // Replaces the legacy binary IsShaded for DNI calculation.
+                // =====================================================================
+                double[] dniTransmissionFactors = null;
+                if (obstacleSet != null && obstacleSet.HasAnyObstacles)
+                {
+                    dniTransmissionFactors = HumanExposureModel.CalculateDNIExposureFactorsBatch(
+                        allFaceCenters, sunVec, obstacleSet,
+                        0.0, 1, rayConfig.MaxShadowDistance);
+                }
+
                 double hourTotalDc = 0;
                 double hourTotalIrr = 0;
                 double hourTotalCellTemp = 0;
                 int faceCount = 0;
 
-                for (int p = 0; p < allFaceData.Count; p++)
+                for (int panelIdx = 0; panelIdx < allFaceData.Count; panelIdx++)
                 {
-                    var faceList = allFaceData[p];
-                    for (int f = 0; f < faceList.Count; f++)
+                    var faceList = allFaceData[panelIdx];
+                    for (int faceIdx = 0; faceIdx < faceList.Count; faceIdx++)
                     {
-                        var fd = faceList[f];
+                        var fd = faceList[faceIdx];
 
                         double directEffective = 0;
                         double cosTheta = fd.Normal * sunVec;
                         cosTheta = Math.Max(-1.0, Math.Min(1.0, cosTheta));
                         double incidenceRad = Math.Acos(Math.Abs(cosTheta));
 
-                        // Front-side sunshine tracking (purely geometric: sun above horizon and unobstructed)
-                        bool frontSunVisible = false;
-                        if (cosTheta > 0)
+                        // ENHANCED (2026-06-15): Fine-grained DNI transmission
+                        // Legacy: bool isShaded = IsShaded(...); frontSunVisible = !isShaded;
+                        // New: dniTransmissionFactor accounts for partial transmission through
+                        // vegetation (Beer-Lambert) and translucent materials (fixed tau).
+                        double dniTransmissionFactor = 1.0;
+                        if (dniTransmissionFactors != null)
                         {
-                            bool isShaded = IsShaded(fd.Center, sunVec, obstacleMeshes, pvMeshes, p,
-                                rayConfig.ShadowRayOffset, rayConfig.MaxShadowDistance);
-                            frontSunVisible = !isShaded;
-                            if (frontSunVisible)
-                                fd.FrontSunshineHours += timeStepHours;
+                            int flatIdx = 0;
+                            for (int pi = 0; pi < panelIdx; pi++) flatIdx += allFaceData[pi].Count;
+                            flatIdx += faceIdx;
+                            dniTransmissionFactor = dniTransmissionFactors[flatIdx];
+                        }
+                        else if (obstacleMeshes.Count > 0 && cosTheta > 0)
+                        {
+                            // Legacy fallback: no ObstacleSet, use binary IsShaded
+                            bool isShaded = IsShaded(fd.Center, sunVec, obstacleMeshes, pvMeshes,
+                                panelIdx, rayConfig.ShadowRayOffset, rayConfig.MaxShadowDistance);
+                            dniTransmissionFactor = isShaded ? 0.0 : 1.0;
                         }
 
-                        // Direct irradiance on front side
-                        if (cosTheta > 0 && record.DirectNormalRadiation > 0 && frontSunVisible)
+                        // Front-side sunshine tracking (geometric: sun above horizon and some DNI reaches face)
+                        bool frontSunVisible = dniTransmissionFactor > 0.001 && cosTheta > 0;
+                        if (frontSunVisible)
+                            fd.FrontSunshineHours += timeStepHours;
+
+                        // Direct irradiance on front side with DNI transmission factor
+                        if (cosTheta > 0 && record.DirectNormalRadiation > 0 && dniTransmissionFactor > 0.001)
                         {
                             double iam = SolarGeometry.IncidenceAngleModifier(
                                 incidenceRad * 180.0 / Math.PI,
                                 pvConfig.IAMCoefficient);
-                            directEffective = record.DirectNormalRadiation * cosTheta * iam;
+                            directEffective = record.DirectNormalRadiation * cosTheta * iam * dniTransmissionFactor;
                         }
 
                         double diffuseEffective;
@@ -598,7 +724,9 @@ namespace SolarPV
                             bool rearSunVisible = false;
                             if (-cosTheta > 0)
                             {
-                                bool isShadedRear = IsShaded(fd.Center, sunVec, obstacleMeshes, pvMeshes, p,
+                                // For rear sunshine, use legacy IsShaded (binary) since DNI
+                                // transmission factor is for front-side direct radiation only
+                                bool isShadedRear = IsShaded(fd.Center, sunVec, obstacleMeshes, pvMeshes, panelIdx,
                                     rayConfig.ShadowRayOffset, rayConfig.MaxShadowDistance);
                                 rearSunVisible = !isShadedRear;
                                 if (rearSunVisible)
@@ -703,7 +831,7 @@ namespace SolarPV
                 return;
             }
 
-            // Set outputs: file paths
+            // Set outputs: file paths (ALL INDICES UNCHANGED)
             DA.SetData(0, Path.Combine(outputFolder, "GeometryResult.txt"));
             DA.SetData(1, Path.Combine(outputFolder, "ViewResult.txt"));
             DA.SetData(2, Path.Combine(outputFolder, "SunRadiationResult.txt"));

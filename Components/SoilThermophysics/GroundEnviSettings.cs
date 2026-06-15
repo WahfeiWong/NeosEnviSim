@@ -22,16 +22,18 @@ namespace SoilThermophysics
     /// Mesh generation is delegated to Geometry.Core (Rhino gridded meshing),
     /// which fills to irregular edges with both quad and triangulated faces.
     ///
+    /// ENHANCED (2026-06-15): ObsSet input removed. Obstacle data should be connected directly
+    /// to the SpatialSoilThermalSimulator component's ObsSet input port.
+    ///
     /// Input order (required first, then by category):
     ///   0 GSurf     Ground geometry (required)
-    ///   1 Obst      Context obstacles (optional)
-    ///   2 Res       Mesh resolution
-    ///   3 d1        Top layer depth
-    ///   4 d2        Deep layer depth
-    ///   5 HExp      Exposure tracing height
-    ///   6 SVFN      SVF sample count
-    ///   7 RhoSur    Surround reflectance
-    ///   8 EpsSur    Surround emissivity
+    ///   1 Res       Mesh resolution
+    ///   2 d1        Top layer depth
+    ///   3 d2        Deep layer depth
+    ///   4 HExp      Exposure tracing height
+    ///   5 SVFN      SVF sample count
+    ///   6 RhoSur    Surround reflectance
+    ///   7 EpsSur    Surround emissivity
     ///
     /// Output order:
     ///   0 GroundSet Encapsulated configuration
@@ -44,9 +46,9 @@ namespace SoilThermophysics
         public GroundSurfaceSettingsComponent()
           : base("Ground Settings", "GroundSet",
               "Converts ground Brep/Surface to mesh + analysis points, " +
-              "converts context obstacles to meshes, " +
               "and encapsulates ground geometry and environment parameters. " +
-              "Outputs GroundSet for SpatialSoilThermalSimulator.",
+              "Outputs GroundSet for SpatialSoilThermalSimulator. " +
+              "Note: ObsSet input removed (2026-06-15). Connect ObsSet directly to SpSoilSim.",
               "Neos", "Thermophysics")
         {
         }
@@ -58,55 +60,45 @@ namespace SoilThermophysics
                 "Input ground Brep or Surface(s). Each face will be meshed independently.",
                 GH_ParamAccess.list);
 
-            // ENHANCED (2026-06-14): ObstacleSet input replaces flat Brep list.
-            // Supports classified obstacles (opaque, tree, translucent) for fine-grained
-            // DNI transmission calculation via Beer-Lambert law.
-            pManager.AddGenericParameter("Obstacle Set", "ObsSet",
-                "Optional: Classified obstacle set (ObstacleSet) for SVF and solar exposure. " +
-                "Connect ObsSet component. Supports opaque buildings, trees with canopy transmission, " +
-                "and translucent sunshades.",
-                GH_ParamAccess.item);
-            pManager[1].Optional = true;
-
             // ---- Mesh parameters ----
             pManager.AddNumberParameter("Resolution", "Res",
                 "Target grid cell size [m]. Smaller = finer mesh. Default 1.0.",
                 GH_ParamAccess.item, 1.0);
-            pManager[2].Optional = true;
+            pManager[1].Optional = true;
 
             // ---- Soil layer depths (contiguous) ----
             pManager.AddNumberParameter("Top Layer d1", "d1",
                 "Top soil layer thickness [m]. Default 0.05 (daily forcing).",
                 GH_ParamAccess.item, 0.05);
-            pManager[3].Optional = true;
+            pManager[2].Optional = true;
 
             pManager.AddNumberParameter("Deep Layer d2", "d2",
                 "Deep soil layer thickness [m]. Default 0.5 (daily average).",
                 GH_ParamAccess.item, 0.5);
-            pManager[4].Optional = true;
+            pManager[3].Optional = true;
 
             // ---- Exposure/SVF parameters (contiguous) ----
             pManager.AddNumberParameter("Exposure Height", "HExp",
                 "Height above ground for solar exposure ray tracing [m]. Default 0.01.",
                 GH_ParamAccess.item, 0.01);
-            pManager[5].Optional = true;
+            pManager[4].Optional = true;
 
             pManager.AddIntegerParameter("SVF Samples", "SVFN",
                 "Hemisphere samples for Sky View Factor calculation. Default 500.",
                 GH_ParamAccess.item, 500);
-            pManager[6].Optional = true;
+            pManager[5].Optional = true;
 
             // ---- Surrounding environment properties (contiguous) ----
             pManager.AddNumberParameter("Surround Reflectance", "RhoSur",
                 "Average shortwave reflectance of surrounding surfaces [-]. " +
                 "Typical: grass/soil 0.2, urban 0.15-0.3. Default 0.2.",
                 GH_ParamAccess.item, 0.2);
-            pManager[7].Optional = true;
+            pManager[6].Optional = true;
 
             pManager.AddNumberParameter("Surround Emissivity", "EpsSur",
                 "Average longwave emissivity of surrounding surfaces [-]. Default 0.95.",
                 GH_ParamAccess.item, 0.95);
-            pManager[8].Optional = true;
+            pManager[7].Optional = true;
         }
 
         protected override void RegisterOutputParams(GH_OutputParamManager pManager)
@@ -137,26 +129,7 @@ namespace SoilThermophysics
                 return;
             }
 
-            // ENHANCED (2026-06-14): Extract ObstacleSet from input (replaces flat Brep list)
-            ObstacleSet obstacleSet = null;
-            GH_ObjectWrapper obsWrapper = null;
-            if (DA.GetData(1, ref obsWrapper))
-            {
-                if (obsWrapper?.Value is ObstacleSet os) obstacleSet = os;
-                else if (obsWrapper?.Value is List<Brep> brepList)
-                {
-                    // Backward compatibility: convert List<Brep> to ObstacleSet (Opaque)
-                    var opaqueMeshes = BrepMeshing.ConvertBrepsToMeshes(brepList);
-                    obstacleSet = new ObstacleSet { OpaqueObjectMeshes = opaqueMeshes };
-                }
-                else if (obsWrapper?.Value is List<Mesh> meshList)
-                {
-                    // Backward compatibility: convert List<Mesh> to ObstacleSet (Opaque)
-                    obstacleSet = new ObstacleSet { OpaqueObjectMeshes = meshList };
-                }
-            }
-
-            // ---- Inputs 2-8: Parameters ----
+            // ---- Inputs 1-7: Parameters (indices shifted -1 after ObsSet removal) ----
             double resolution = 1.0;
             double d1 = 0.05, d2 = 0.5;
             double exposureHeight = 0.01;
@@ -164,13 +137,13 @@ namespace SoilThermophysics
             double surroundReflectance = 0.2;
             double surroundEmissivity = 0.95;
 
-            DA.GetData(2, ref resolution);
-            DA.GetData(3, ref d1);
-            DA.GetData(4, ref d2);
-            DA.GetData(5, ref exposureHeight);
-            DA.GetData(6, ref svfSampleCount);
-            DA.GetData(7, ref surroundReflectance);
-            DA.GetData(8, ref surroundEmissivity);
+            DA.GetData(1, ref resolution);
+            DA.GetData(2, ref d1);
+            DA.GetData(3, ref d2);
+            DA.GetData(4, ref exposureHeight);
+            DA.GetData(5, ref svfSampleCount);
+            DA.GetData(6, ref surroundReflectance);
+            DA.GetData(7, ref surroundEmissivity);
 
             // Clamp values
             resolution = Math.Max(0.01, resolution);
@@ -181,8 +154,8 @@ namespace SoilThermophysics
             surroundReflectance = Math.Max(0.0, Math.Min(1.0, surroundReflectance));
             surroundEmissivity = Math.Max(0.0, Math.Min(1.0, surroundEmissivity));
 
-            // Ensure obstacleSet is initialized (null if no obstacles connected)
-            if (obstacleSet == null) obstacleSet = new ObstacleSet();
+            // (2026-06-15) ObsSet no longer populated from input. Empty default.
+            var obstacleSet = new ObstacleSet();
 
             // ---- Mesh Generation via Geometry.Core ----
             var allMeshes = new List<Mesh>();
@@ -250,21 +223,14 @@ namespace SoilThermophysics
                 SurroundReflectance = surroundReflectance,
                 SurroundEmissivity = surroundEmissivity,
                 MeshResolution = resolution,
-                ObstacleSet = obstacleSet
+                ObstacleSet = obstacleSet  // empty (2026-06-15)
             };
-
-            string obsInfo = obstacleSet.HasAnyObstacles
-                ? $"Opaque={obstacleSet.OpaqueObjectMeshes?.Count ?? 0}, " +
-                  $"TreeDet={obstacleSet.TreeDetailMeshes?.Count ?? 0}, " +
-                  $"TreeCan={obstacleSet.TreeCanopyMeshes?.Count ?? 0}, " +
-                  $"TransShd={obstacleSet.TranslucentShadeMeshes?.Count ?? 0}"
-                : "None";
 
             string summary = $"=== Ground Surface Settings ===\n" +
                 $"Surfaces ............. {surfaceCount}\n" +
                 $"Mesh Faces ........... {totalFaces}\n" +
                 $"Analysis Points ...... {allPoints.Count}\n" +
-                $"Obstacles (ObsSet) ... {obsInfo}\n" +
+                $"Obstacles (ObsSet) ... None (connect ObsSet directly to SpSoilSim)\n" +
                 $"Resolution ........... {resolution:F2} m\n" +
                 $"Layer Depths ......... d1={d1:F3}m d2={d2:F3}m\n" +
                 $"Exposure Height ...... {exposureHeight:F3} m\n" +
@@ -272,6 +238,7 @@ namespace SoilThermophysics
                 $"Reflectance .......... {surroundReflectance:F2}\n" +
                 $"Emissivity ........... {surroundEmissivity:F2}";
 
+            // Output indices unchanged
             DA.SetData(0, new GH_ObjectWrapper(config));
             DA.SetData(1, mergedMesh);
             DA.SetDataList(2, allPoints);

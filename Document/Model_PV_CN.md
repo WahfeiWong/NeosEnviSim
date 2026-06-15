@@ -2,6 +2,8 @@
 
 本模块包含从太阳辐射计算到光伏系统发电量估算的完整模拟链，涵盖太阳几何计算、天空散射模型、双面光伏模型、组件温度模型以及逆变器/MPPT模型，基于EPW气象数据进行逐时性能模拟。
 
+**增强版（2026-06-15）：** RadSim 组件的障碍物输入（索引 1）由 Brep List 改为 ObstacleSet 封装数据，实现与 SpatialSoilThermalSimulator 和 Outdoor MRT 组件一致的精细化 DNI 计算。当射线同时穿过多种非 Opaque 障碍物时，各项透射率**相乘**（Beer-Lambert 冠层透射 + 半透明遮阳透射）。ObsSet 输入端**不再向后兼容**，仅接受 ObstacleSet 类型数据。
+
 ---
 
 ## 1. 太阳几何计算（SolarGeometry.cs）
@@ -236,19 +238,25 @@ MPPT窗口检查：若 $V_{\text{string}} < V_{\text{min}}$ 或 $V_{\text{string
 
 ### 6.1 输入参数
 
+**变更（2026-06-15）：** 索引 1 的障碍物输入由 `Brep List` 改为 `ObstacleSet`（ObsSet），实现精细化 DNI 透射计算。后续输入端索引不变。
+
 | 索引 | 参数 | 类型 | 说明 |
 |:---:|:---:|:---:|:---|
 | 0 | EPW File | Text | EPW气象文件路径 |
-| 1 | Obstacles | Brep List | 环境障碍物（可选） |
-| 2 | Measurement Surfaces | Brep List | 待测表面（PV面板或传感器面） |
-| 3 | Time Settings | Generic | 时间设置（可选） |
-| 4 | PV Settings | Generic | PV组件设置（可选） |
-| 5 | Temperature Settings | Generic | 温度模型设置（可选） |
-| 6 | Sky Model Settings | Generic | 天空模型设置（可选） |
-| 7 | Raytracing Settings | Generic | 光线追踪设置（可选） |
-| 8 | Inverter Settings | Generic | 逆变器设置（可选） |
-| 9 | Output Folder | Text | 结果输出文件夹（可选） |
-| 10 | Run | Boolean | 执行开关 |
+| 1 | **ObsSet** | **Generic** | **变更（2026-06-15）**：分类障碍物设置集（ObstacleSet）。连接 ObsSet 组件。支持不透光建筑（完全阻挡）、树木（Beer-Lambert 冠层透射）、半透明遮阳（固定透射率）。**不再接受 Brep List 直接输入** |
+| 2 | Ground Set | Generic | 地面环境配置（来自 Ground Surface Settings）（可选） |
+| 3 | PV System Set | Generic | PV系统配置（来自 PV System Settings） |
+| 4 | Simulation Config | Generic | 模拟配置 |
+| 5 | Geometry | Brep List | Brep几何体（手动模式） |
+| 6 | MPlane | Plane List | 安装平面（手动模式） |
+| 7 | Size | Number List | 面板尺寸 [宽, 高]（手动模式） |
+| 8 | Time Settings | Generic | 时间设置（可选） |
+| 9 | Ta | Number | 环境温度覆盖 [°C]（可选） |
+| 10 | Albedo | Number | 地面反照率覆盖 [0-1]（可选） |
+| 11 | Bifacial | Generic | 双面参数（可选） |
+| 12 | Inverter | Generic | 逆变器参数（可选） |
+| 13 | Output Folder | Text | 结果输出文件夹 |
+| 14 | Run | Boolean | 执行开关 |
 
 ### 6.2 输出结果（6个分类文件）
 
@@ -264,19 +272,24 @@ MPPT窗口检查：若 $V_{\text{string}} < V_{\text{min}}$ 或 $V_{\text{string
 ### 6.3 模拟流程
 
 1. 读取EPW气象数据 → 解析经纬度、时区、高程
-2. 表面网格化 → 使用 Geometry.Core 生成规则网格
-3. 计算天空视角系数（SVF）→ Fibonacci半球采样 + 光线追踪
-4. 若为双面模式 → 额外计算背面SVF
-5. **逐时循环：**
+2. 读取 ObsSet（如连接）→ 获取分类障碍物数据（Opaque/Tree/Translucent）
+3. 表面网格化 → 使用 Geometry.Core 生成规则网格
+4. 计算天空视角系数（SVF）→ Fibonacci半球采样 + 光线追踪
+5. 若为双面模式 → 额外计算背面SVF
+6. **逐时循环：**
    - NREL-SPA计算太阳位置
-   - 阴影检测（直接太阳射线追踪）
-   - 倾斜面辐照度 = 直接（含IAM）+ 散射（Perez或各向同性）+ 地面反射
+   - **精细化 DNI 暴露因子计算（2026-06-15）：**
+     - Opaque 命中 → DNI = 0（完全阻挡）
+     - Tree 命中 → Beer-Lambert 冠层透射 $\exp(-k \cdot \text{LAD} \cdot s)$
+     - Translucent 命中 → 固定透射率 $	au$（多个 Translucent Mesh 相乘）
+     - 多种非 Opaque 障碍物 → **透射率相乘**
+   - 倾斜面辐照度 = 直接（含IAM和DNI暴露因子）+ 散射（Perez或各向同性）+ 地面反射
    - 组件温度（Faiman/NOCT/Sandia）
    - 温度修正效率
    - DC发电量
    - 若为双面模式 → 背面辐照度 + 双面增益
    - 若为逆变器模式 → DC-AC转换（含削峰和MPPT窗口检查）
-6. 保存6类结果文件
+7. 保存6类结果文件
 
 ---
 
