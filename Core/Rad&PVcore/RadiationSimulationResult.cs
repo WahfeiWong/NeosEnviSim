@@ -181,6 +181,39 @@ namespace SolarPV.Core
                     lines.Add($"{v:F6}");
             }
 
+            // ENHANCED (2026-06-16): Save TVF and TRVF
+            lines.Add("[FrontTVF]");
+            foreach (var panel in View.FrontTVF)
+            {
+                lines.Add($"P:{panel.Count}");
+                foreach (var v in panel)
+                    lines.Add($"{v:F6}");
+            }
+
+            lines.Add("[RearTVF]");
+            foreach (var panel in View.RearTVF)
+            {
+                lines.Add($"P:{panel.Count}");
+                foreach (var v in panel)
+                    lines.Add($"{v:F6}");
+            }
+
+            lines.Add("[FrontTRVF]");
+            foreach (var panel in View.FrontTRVF)
+            {
+                lines.Add($"P:{panel.Count}");
+                foreach (var v in panel)
+                    lines.Add($"{v:F6}");
+            }
+
+            lines.Add("[RearTRVF]");
+            foreach (var panel in View.RearTRVF)
+            {
+                lines.Add($"P:{panel.Count}");
+                foreach (var v in panel)
+                    lines.Add($"{v:F6}");
+            }
+
             File.WriteAllLines(path, lines);
         }
 
@@ -407,8 +440,18 @@ namespace SolarPV.Core
         public int PanelCount { get; set; }
         public List<List<double>> FrontSVF { get; set; } = new List<List<double>>();
         public List<List<double>> RearSVF { get; set; } = new List<List<double>>();
+        /// <summary>ENHANCED (2026-06-16): OVF is now OPAQUE-ONLY (previously included all obstacles).</summary>
         public List<List<double>> FrontObstacleViewFactor { get; set; } = new List<List<double>>();
+        /// <summary>ENHANCED (2026-06-16): OVF is now OPAQUE-ONLY (previously included all obstacles).</summary>
         public List<List<double>> RearObstacleViewFactor { get; set; } = new List<List<double>>();
+        /// <summary>ENHANCED (2026-06-16): Tree View Factor - directions blocked by tree detail meshes.</summary>
+        public List<List<double>> FrontTVF { get; set; } = new List<List<double>>();
+        /// <summary>ENHANCED (2026-06-16): Rear-side Tree View Factor.</summary>
+        public List<List<double>> RearTVF { get; set; } = new List<List<double>>();
+        /// <summary>ENHANCED (2026-06-16): Translucent View Factor - directions blocked by translucent shade meshes.</summary>
+        public List<List<double>> FrontTRVF { get; set; } = new List<List<double>>();
+        /// <summary>ENHANCED (2026-06-16): Rear-side Translucent View Factor.</summary>
+        public List<List<double>> RearTRVF { get; set; } = new List<List<double>>();
     }
 
     [Serializable]

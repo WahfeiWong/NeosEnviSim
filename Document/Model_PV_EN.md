@@ -68,7 +68,60 @@ Where $\phi = \pi(3 - \sqrt{5})$ is the golden angle.
 
 ---
 
-## 2. Perez Sky Diffuse Model (PerezSkyModel.cs)
+## 2. Decomposed View Factors for Diffuse Radiation (HumanExposureModel.cs)
+
+### 2.1 Physical Basis
+
+**ENHANCED (2026-06-16):** To accurately simulate the effects of vegetation and translucent sunshades on diffuse radiation, the traditional single SVF (Sky View Factor) approach is extended to four mutually exclusive decomposed view factors:
+
+| View Factor | Symbol | Description |
+|:---:|:---:|:---|
+| Sky View Factor | $F_{	ext{SVF}}$ | Visible sky directions (no obstruction) |
+| Opaque Obstacle View Factor | $F_{	ext{OVF,opaque}}$ | Directions blocked by opaque objects only |
+| Tree View Factor | $F_{	ext{TVF}}$ | Directions blocked by tree detail meshes |
+| Translucent View Factor | $F_{	ext{TRVF}}$ | Directions blocked by translucent shade meshes |
+
+**Conservation:**
+
+$$F_{	ext{SVF}} + F_{	ext{OVF,opaque}} + F_{	ext{TVF}} + F_{	ext{TRVF}} = 1.0 \quad 	ext{(upper hemisphere)}$$
+
+**Overlap Resolution Priority:** When a ray direction intersects multiple obstacle types simultaneously, the priority is: **Opaque > TreeDetail > TranslucentShade**. This ensures directions blocked by both buildings and trees are assigned to the opaque category (the building occludes the tree from the analysis point's perspective).
+
+### 2.2 Effective Diffuse Irradiance
+
+The effective diffuse irradiance on a tilted surface accounts for partial transmission through tree canopies and translucent materials:
+
+$$I_{	ext{DH,eff}} = I_{	ext{DH,base}} \cdot \left( F_{	ext{SVF}} + F_{	ext{TVF}} \cdot e^{-k_c \cdot 	ext{LAD} \cdot l} + F_{	ext{TRVF}} \cdot 	au ight)$$
+
+Where:
+- $I_{	ext{DH,base}}$: Full-hemisphere diffuse irradiance (isotropic or Perez) [W/m²]
+- $k_c$: Extinction coefficient of tree canopy [-]
+- $	ext{LAD}$: Leaf area density [m²/m³]
+- $l$: Characteristic canopy thickness [m], computed as the Z-axis extent of the combined bounding box of all TreeCanopyMeshes
+- $	au$: Shortwave transmittance of translucent shade material [-]
+- $e^{-k_c \cdot 	ext{LAD} \cdot l}$: Beer-Lambert canopy transmission factor
+
+**Tree Canopy Characteristic Thickness:**
+
+$$l = \max(0, \; Z_{\max} - Z_{\min})$$
+
+Where $Z_{\max}$ and $Z_{\min}$ are the maximum and minimum Z-coordinates of the combined bounding box of all simplified tree canopy envelope meshes (TreeCanopyMeshes).
+
+### 2.3 SVF-Obstacle Factor (SVF-OVF) Definition
+
+The decomposed view factors replace the previous single SVF and OVF (which combined all obstacle types). The **SVF remains unchanged** (still representing the visible sky fraction), while the **OVF is now OPAQUE-ONLY** (previously included opaque objects, tree detail meshes, and translucent shade meshes combined).
+
+**Before (Legacy):**
+- OVF = opaque + tree + translucent (all obstacles combined)
+
+**After (Enhanced):**
+- OVF_opaque = opaque objects only
+- TVF = tree detail meshes
+- TRVF = translucent shade meshes
+
+---
+
+## 3. Perez Sky Diffuse Model (PerezSkyModel.cs)
 
 Based on the Perez, Ineichen et al. (1987, 1990) sky anisotropic diffuse model.
 
@@ -121,9 +174,9 @@ When $F_{\text{SVF}} < 0.3$ (heavy occlusion), Perez results are scaled by $F_{\
 
 ---
 
-## 3. Bifacial PV Model (BifacialModel.cs)
+## 4. Bifacial PV Model (BifacialModel.cs)
 
-### 3.1 Rear-Side Irradiance
+### 7.1 Rear-Side Irradiance
 
 $$I_{\text{rear}} = \big( I_{\text{GH}} \cdot \rho_g \cdot F_{r \to g} \cdot S_f + I_{\text{DH}} \cdot F_{r \to \text{sky}} \cdot F_{\text{SVF,rear}} \big) \cdot f_{\text{rg}}$$
 
@@ -139,7 +192,7 @@ $$S_f = \frac{1}{1 + 0.5 \cdot (H / D) \cdot \sin\beta}$$
 
 Where $H$ is the module installation height and $D$ is the row spacing. The result is constrained within [0.1, 1.0].
 
-### 3.2 Bifacial Gain Power
+### 7.2 Bifacial Gain Power
 
 $$P_{\text{rear}} = I_{\text{rear}} \cdot A_{\text{gross}} \cdot \phi_{\text{active}} \cdot \eta_{\text{front}} \cdot \phi_{\text{bifacial}}$$
 
@@ -149,15 +202,15 @@ Where:
 - $\eta_{\text{front}}$: Temperature-corrected front-side efficiency
 - $\phi_{\text{bifacial}}$: Bifaciality factor (default 0.7)
 
-### 3.3 Bifacial Gain Ratio
+### 5.3 Bifacial Gain Ratio
 
 $$\text{BG} = \frac{I_{\text{rear}}}{I_{\text{front}}} \cdot \phi_{\text{bifacial}}$$
 
 ---
 
-## 4. PV Module Temperature Model (PVTemperatureModel.cs)
+## 5. PV Module Temperature Model (PVTemperatureModel.cs)
 
-### 4.1 Faiman Model (Preferred)
+### 7.1 Faiman Model (Preferred)
 
 $$T_{\text{cell}} = T_a + \frac{I_{\text{POA}}}{U_0 + U_1 \cdot v_w}$$
 
@@ -176,7 +229,7 @@ Where:
 | BuildingIntegrated (BIPV) | 15.0 | 4.50 |
 | Concentrator | 30.0 | 8.00 |
 
-### 4.2 NOCT Model (Fallback when no wind speed)
+### 7.2 NOCT Model (Fallback when no wind speed)
 
 $$T_{\text{cell}} = T_a + \frac{(\text{NOCT} - 20)}{800} \cdot I_{\text{POA}} \cdot R_{\text{thermal}}$$
 
@@ -186,7 +239,7 @@ $$R_{\text{thermal}} = \frac{1 - \eta}{1 - \eta_{\text{ref}}}$$
 
 $\eta_{\text{ref}}$ is the reference efficiency at NOCT test conditions (default 0.10), and the result is constrained within [0.5, 2.0].
 
-### 4.3 Sandia Temperature Model
+### 5.3 Sandia Temperature Model
 
 $$T_{\text{module}} = T_a + I_{\text{POA}} \cdot e^{a + b \cdot v_w}$$
 
@@ -194,7 +247,7 @@ $$T_{\text{cell}} = T_{\text{module}} + \frac{I_{\text{POA}}}{1000} \cdot \Delta
 
 Default parameters: $a = -3.47$, $b = -0.0594$, $\Delta T = 3$ °C.
 
-### 4.4 Temperature-Corrected Efficiency
+### 5.4 Temperature-Corrected Efficiency
 
 $$\eta(T) = \eta_{\text{STC}} \cdot \big[ 1 + \gamma \cdot (T_{\text{cell}} - T_{\text{STC}}) \big]$$
 
@@ -202,9 +255,9 @@ Where $\gamma$ is the maximum power temperature coefficient [%/°C or 1/°C].
 
 ---
 
-## 5. Inverter and MPPT Model (InverterMPPTModel.cs)
+## 6. Inverter and MPPT Model (InverterMPPTModel.cs)
 
-### 5.1 PVWatts Inverter Model
+### 7.1 PVWatts Inverter Model
 
 Based on the PVWatts Version 5 model by Dobos (2014).
 
@@ -222,7 +275,7 @@ $$P_{\text{ac}} = P_{\text{dc}} \cdot \eta_{\text{op}}$$
 
 **Nighttime Tare Loss:** If output $<$ TareLoss, output is set to 0.
 
-### 5.2 String Voltage Calculation
+### 7.2 String Voltage Calculation
 
 $$V_{\text{string}} = N_s \cdot V_{\text{mp}} \cdot \big[1 + \gamma_V \cdot (T_{\text{cell}} - 25)\big]$$
 
@@ -232,9 +285,9 @@ MPPT window check: If $V_{\text{string}} < V_{\text{min}}$ or $V_{\text{string}}
 
 ---
 
-## 6. Radiation Simulation Engine (NeosRadSim.cs)
+## 7. Radiation Simulation Engine (NeosRadSim.cs)
 
-### 6.1 Input Parameters
+### 7.1 Input Parameters
 
 | Index | Parameter | Type | Description |
 |:---:|:---:|:---:|:---|
@@ -250,27 +303,28 @@ MPPT window check: If $V_{\text{string}} < V_{\text{min}}$ or $V_{\text{string}}
 | 9 | Output Folder | Text | Result output folder (optional) |
 | 10 | Run | Boolean | Execution switch |
 
-### 6.2 Output Results (6 Category Files)
+### 7.2 Output Results (6 Category Files)
 
 | File | Content |
 |:---:|:---|
 | GeometryResult.txt | Mesh data, face centers, normal vectors, areas, tilt angles, solar vectors |
-| ViewResult.txt | Front/rear SVF, front/rear obstacle view factors |
+| ViewResult.txt | Front/rear SVF, front/rear OVF (opaque-only), front/rear TVF, front/rear TRVF |
 | SunRadiationResult.txt | Sunshine hours, hourly/cumulative radiation (front/rear) |
 | PVInfoResult.txt | Cell temperature, effective irradiance, clipping loss, inverter loss |
 | DCResult.txt | Hourly/cumulative DC power generation (front/rear) |
 | ACResult.txt | Hourly/cumulative AC power generation (front/rear) |
 
-### 6.3 Simulation Flow
+### 7.3 Simulation Flow
 
 1. Read EPW meteorological data → parse latitude, longitude, time zone, elevation
 2. Surface meshing → use Geometry.Core to generate regular grids
-3. Calculate sky view factor (SVF) → Fibonacci hemisphere sampling + ray tracing
-4. If in bifacial mode → additionally calculate rear-side SVF
+3. Calculate decomposed view factors → Fibonacci hemisphere sampling + ray tracing
+   - SVF (sky), OVF_opaque (opaque only), TVF (tree detail), TRVF (translucent shade)
+4. If in bifacial mode → additionally calculate rear-side decomposed view factors
 5. **Hourly loop:**
    - NREL-SPA solar position calculation
    - Shadow detection (direct solar ray tracing)
-   - Tilted surface irradiance = direct (with IAM) + diffuse (Perez or isotropic) + ground reflection
+   - Tilted surface irradiance = direct (with IAM) + diffuse (Perez/isotropic with TVF/TRVF correction) + ground reflection
    - Module temperature (Faiman/NOCT/Sandia)
    - Temperature-corrected efficiency
    - DC power generation

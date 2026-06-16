@@ -24,7 +24,7 @@ namespace SoilThermophysics
     ///   4. Shortwave separation &amp; correction:
     ///        GHI_actual = DHI * SVF + DNI * sin(alt) * Exposure + rho_sur * GHI_sur * (1-SVF)
     ///   5. Longwave separation &amp; correction:
-    ///        L_actual = L_sky * SVF + epsilon_sur * sigma * T_sur^4 * (1-SVF)
+    ///        L_actual = L_sky * SVF + epsilon_sur * sigma * (T_obs^4 * OVF + T_tree^4 * TVF + T_trans^4 * TRVF)
     ///   6. Parallel Force-Restore + Penman-Monteith single-source simulation per point
     ///
     /// Integrated inputs:
@@ -44,8 +44,7 @@ namespace SoilThermophysics
     ///   3 SoilThermSet  Soil thermal config         (required)
     ///   4 SoilSurSet Surface aerodynamic config     (optional)
     ///   5 SoilMoistSet Moisture config              (optional)
-    ///   6 T_sur      Surround surface temp          (optional, -999=use EPW air temp)
-    ///   7 TimeSet    Time range config              (optional)
+        ///   7 TimeSet    Time range config              (optional)
     ///   8 PreHeat    Pre-heat duration [h]          (optional, default 24)
     ///   9 Folder     Output folder path             (penultimate)
     ///  10 Run        Execution toggle               (last)
@@ -105,31 +104,24 @@ namespace SoilThermophysics
                 "Soil moisture configuration (optional, from Soil Moisture Settings)", GH_ParamAccess.item);
             pManager[5].Optional = true;
 
-            // ---- Optional: Surround surface temperature override ----
-            pManager.AddNumberParameter("Surround Temp", "T_sur",
-                "Surrounding surface temperature [C] for longwave correction. " +
-                "If not provided, air temperature from EPW is used (may underestimate in urban areas).",
-                GH_ParamAccess.item);
-            pManager[6].Optional = true;
-
             // ---- Optional: Time range config ----
             pManager.AddGenericParameter("Time Settings", "TimeSet",
                 "Optional: time period configuration (from Time Settings component). " +
                 "If not provided, full-year simulation is performed.",
                 GH_ParamAccess.item);
-            pManager[7].Optional = true;
+            pManager[6].Optional = true;
 
             // ---- Optional: Pre-heat duration ----
             pManager.AddIntegerParameter("Pre-heat Hours", "PreHeat",
                 "Pre-heat duration in hours for non-full-year simulation (default 2). " +
                 "Only effective when TimeSet is connected. Results during pre-heat are discarded.",
                 GH_ParamAccess.item, 2);
-            pManager[8].Optional = true;
+            pManager[7].Optional = true;
 
             // Output folder
             pManager.AddTextParameter("Output Folder", "Folder",
                 "Folder path for saving spatial simulation results", GH_ParamAccess.item);
-            pManager[9].Optional = true;
+            pManager[8].Optional = true;
 
             // Run toggle
             pManager.AddBooleanParameter("Run", "Run",
@@ -138,7 +130,8 @@ namespace SoilThermophysics
 
         protected override void RegisterOutputParams(GH_OutputParamManager pManager)
         {
-            // ---- ALL OUTPUTS UNCHANGED (requirement #5) ----
+            // ENHANCED (2026-06-16): Added TVF and TRVF outputs for decomposed view factors.
+            // Ports 0-4 unchanged. TVF=5, TRVF=6 are NEW.
             pManager.AddGenericParameter("Spatial Result", "Result",
                 "Spatial simulation result object", GH_ParamAccess.item);
             pManager.AddTextParameter("Log", "Log",
@@ -148,7 +141,12 @@ namespace SoilThermophysics
             pManager.AddNumberParameter("Mean Tg", "TgMean",
                 "Mean annual ground temperature [C] per point", GH_ParamAccess.list);
             pManager.AddNumberParameter("SVF", "SVF",
-                "Sky view factor per point (2π)", GH_ParamAccess.list);
+                "Sky view factor per point (2\u03c0)", GH_ParamAccess.list);
+            // NEW 2026-06-16: Decomposed view factors for precise diffuse radiation
+            pManager.AddNumberParameter("Tree View Factor", "TVF",
+                "Tree canopy view factor per point (2\u03c0). Directions blocked by tree detail meshes. NEW 2026-06-16.", GH_ParamAccess.list);
+            pManager.AddNumberParameter("Translucent View Factor", "TRVF",
+                "Translucent shade view factor per point (2\u03c0). Directions blocked by translucent shade meshes. NEW 2026-06-16.", GH_ParamAccess.list);
         }
 
         protected override void SolveInstance(IGH_DataAccess DA)
@@ -159,7 +157,7 @@ namespace SoilThermophysics
             {
                 // ---- Last (10): Check Run toggle ----
                 bool run = false;
-                DA.GetData(10, ref run);
+                DA.GetData(9, ref run);
                 if (!run)
                 {
                     logs.Add("Simulation paused. Set 'Run' to true to execute.");
@@ -304,21 +302,17 @@ namespace SoilThermophysics
                 // ---- 5: Soil Moisture config (was index 4, now index 5) ----
                 var moistConfig = ExtractConfig<SoilMoistureConfig>(DA, 5) ?? new SoilMoistureConfig();
 
-                // ---- 6: Surround temperature override (was index 5, now index 6) ----
-                double surroundTempOverride = -999;
-                DA.GetData(6, ref surroundTempOverride);
-
-                // ---- 7: TimeSet (was index 6, now index 7) ----
+                // ---- 6: TimeSet (was index 7) ----
                 SimulationTimeConfig timeConfig = null;
                 GH_ObjectWrapper timeWrapper = null;
-                if (DA.GetData(7, ref timeWrapper) && timeWrapper?.Value is SimulationTimeConfig tc)
+                if (DA.GetData(6, ref timeWrapper) && timeWrapper?.Value is SimulationTimeConfig tc)
                 {
                     timeConfig = tc;
                 }
 
-                // ---- 8: Pre-heat duration (was index 7, now index 8) ----
+                // ---- 8: Pre-heat duration (was index 8, now index 7) ----
                 int preHeatHours = 24;
-                DA.GetData(8, ref preHeatHours);
+                DA.GetData(7, ref preHeatHours);
                 preHeatHours = Math.Max(0, preHeatHours);  // ensure non-negative
 
                 // Determine simulation time range
@@ -360,7 +354,7 @@ namespace SoilThermophysics
 
                 // ---- 9: Output Folder (was index 8, now index 9) ----
                 string folder = "";
-                if (!DA.GetData(9, ref folder)) return;
+                if (!DA.GetData(8, ref folder)) return;
                 if (!Directory.Exists(folder)) Directory.CreateDirectory(folder);
 
                 int nPts = analysisPoints.Count;
@@ -434,23 +428,53 @@ namespace SoilThermophysics
                 }
 
                 // =====================================================================
-                // Phase 1: SVF (ground-level sky view factor)
+                // ENHANCED (2026-06-16): Decomposed view factor calculation
+                // Computes: SVF (sky), TVF (tree), TRVF (translucent), OVF_opaque (opaque)
+                // Conservation: SVF + TVF + TRVF + OVF_opaque = 1.0
                 // =====================================================================
                 var svf = new double[nPts];
-                if (svfObstacleMeshes.Count > 0)
+                var tvf = new double[nPts];    // NEW 2026-06-16
+                var trvf = new double[nPts];   // NEW 2026-06-16
+                var ovfOpaque = new double[nPts]; // NEW 2026-06-16 (opaque-only)
+
+                if (obstacleSet != null && obstacleSet.HasAnyObstacles)
                 {
+                    // Use decomposed view factor calculation with ObstacleSet
+                    HumanExposureModel.CalculateDecomposedViewFactorsBatch(
+                        analysisPoints, obstacleSet,
+                        svf, tvf, trvf, ovfOpaque,
+                        exposureHeight, svfSampleCount);
+                    logs.Add($"SVF range: [{svf.Min():F3}, {svf.Max():F3}] (avg={svf.Average():F3}), " +
+                             $"TVF=[{tvf.Min():F3},{tvf.Max():F3}], TRVF=[{trvf.Min():F3},{trvf.Max():F3}]");
+                }
+                else if (svfObstacleMeshes.Count > 0)
+                {
+                    // Legacy: flat obstacle mesh list (no decomposition)
                     Parallel.For(0, nPts, i =>
                     {
                         svf[i] = HumanExposureModel.CalculateSkyViewFactorForPoint(
                             analysisPoints[i], svfObstacleMeshes, exposureHeight, svfSampleCount);
                     });
-                    logs.Add($"SVF range: [{svf.Min():F3}, {svf.Max():F3}] (avg={svf.Average():F3})");
+                    for (int i = 0; i < nPts; i++) { tvf[i] = 0.0; trvf[i] = 0.0; ovfOpaque[i] = 1.0 - svf[i]; }
+                    logs.Add($"SVF range: [{svf.Min():F3}, {svf.Max():F3}] (avg={svf.Average():F3}) [legacy mode]");
                 }
                 else
                 {
-                    for (int i = 0; i < nPts; i++) svf[i] = 1.0;
+                    for (int i = 0; i < nPts; i++)
+                    {
+                        svf[i] = 1.0; tvf[i] = 0.0; trvf[i] = 0.0; ovfOpaque[i] = 0.0;
+                    }
                     logs.Add("No obstacles: SVF=1.0 for all points.");
                 }
+
+                // Precompute tree canopy transmission parameters (used in diffuse correction)
+                double canopyThickness = obstacleSet != null
+                    ? HumanExposureModel.CalculateCanopyCharacteristicThickness(obstacleSet.TreeCanopyMeshes)
+                    : 0.0;
+                double kcLAD = obstacleSet != null
+                    ? obstacleSet.ExtinctionCoefficient * obstacleSet.LeafAreaDensity : 0.0;
+                double treeTransmittance = Math.Exp(-kcLAD * canopyThickness);
+                double translucentTau = obstacleSet != null ? obstacleSet.TranslucentTransmittance : 0.0;
 
                 // =====================================================================
                 // Phase 2: Solar position (compute for all hours)
@@ -608,12 +632,19 @@ namespace SoilThermophysics
                         // Per-point corrected SHORTWAVE (ENHANCED 2026-06-15)
                         // dniExposureFactors accounts for transmission through vegetation
                         // (Beer-Lambert) and translucent materials, with multi-obstacle product.
-                        double diffuseActual = dhi * svf[pIdx];
+                        // ENHANCED (2026-06-16): Precise diffuse radiation with decomposed view factors.
+                        // DHI_eff = SVF*DHI + TVF*DHI*exp(-k*LAD*l) + TRVF*DHI*tau
+                        double diffuseActual = dhi * svf[pIdx]
+                                             + dhi * tvf[pIdx] * treeTransmittance
+                                             + dhi * trvf[pIdx] * translucentTau;
                         double directHorizontal = dni * sinAlt * dniExposureFactors[pIdx, hoy];
                         // Surround GHI assumes open horizontal ground (SVF=1, no shading).
                         // Correct formula: GHI_surround = DHI + DNI*sin(alt) for open horizontal surface
                         double ghiSurround = dhi + dni * sinAlt;
-                        double reflectedActual = surroundReflectance * ghiSurround * (1.0 - svf[pIdx]);
+                        // Surround reflectance uses total non-sky fraction (all obstacles contribute
+                        // to ground-level reflection: opaque, tree, and translucent)
+                        double nonSkyFraction = 1.0 - svf[pIdx];
+                        double reflectedActual = surroundReflectance * ghiSurround * nonSkyFraction;
 
                         double ghiActual = diffuseActual + directHorizontal + reflectedActual;
                         ghiActual = Math.Max(0.0, ghiActual);
@@ -625,14 +656,24 @@ namespace SoilThermophysics
                             : -999;
                         double effectiveTair = airTempOverride > -273.15 ? airTempOverride : tAir;
 
-                        // Per-point corrected LONGWAVE
+                        // Per-point corrected LONGWAVE with decomposed surface temperatures
                         double lSky = lDownEpw * svf[pIdx];
-                        double surroundTempC = (surroundTempOverride > -273.0)
-                            ? surroundTempOverride   // User-specified surround temperature
-                            : effectiveTair;          // Fallback to air temperature
-                        double tSurroundK = surroundTempC + 273.15;
-                        double lSurround = surroundEmissivity * 5.67e-8
-                            * Math.Pow(tSurroundK, 4) * (1.0 - svf[pIdx]);
+
+                        // Get surface temperatures from ObstacleSet (fallback to air temperature)
+                        double obsSurTemp = effectiveTair;
+                        double treeSurTemp = effectiveTair;
+                        double transSurTemp = effectiveTair;
+                        if (obstacleSet != null)
+                        {
+                            obsSurTemp = obstacleSet.GetObstacleTemperature(hoy, effectiveTair);
+                            treeSurTemp = obstacleSet.GetTreeCanopyTemperature(hoy, effectiveTair);
+                            transSurTemp = obstacleSet.GetTranslucentSurfaceTemperature(hoy, effectiveTair);
+                        }
+
+                        double lSurround = surroundEmissivity * 5.67e-8 * (
+                            Math.Pow(obsSurTemp + 273.15, 4) * ovfOpaque[pIdx] +
+                            Math.Pow(treeSurTemp + 273.15, 4) * tvf[pIdx] +
+                            Math.Pow(transSurTemp + 273.15, 4) * trvf[pIdx]);
                         double lDownActual = lSky + lSurround;
 
                         // Wind speed override (if configured)
@@ -727,6 +768,9 @@ namespace SoilThermophysics
                 DA.SetDataList(2, allET.Select(e => e.Sum()).ToList());
                 DA.SetDataList(3, allTg.Select(t => t.Average()).ToList());
                 DA.SetDataList(4, svf.ToList());
+                // NEW 2026-06-16: Output decomposed view factors
+                DA.SetDataList(5, tvf.ToList());
+                DA.SetDataList(6, trvf.ToList());
             }
             catch (Exception ex)
             {

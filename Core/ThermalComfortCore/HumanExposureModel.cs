@@ -599,15 +599,390 @@ namespace ThermalComfort.Core
         }
 
         // ========================================================================
+        // ENHANCED (2026-06-16): Decomposed view factors for diffuse radiation
+        // ========================================================================
+
+        /// <summary>
+        /// Calculate the characteristic canopy thickness l [m] from TreeCanopyMeshes.
+        /// Uses the Z-axis extent of the combined bounding box of all canopy meshes.
+        /// This value is used in the Beer-Lambert term for tree canopy diffuse radiation:
+        ///   DHI_tree = TVF * DHI * exp(-k_c * LAD * l)
+        /// </summary>
+        /// <param name="treeCanopyMeshes">Simplified tree canopy envelope meshes</param>
+        /// <returns>Characteristic canopy thickness l [m]. 0 if no canopy meshes.</returns>
+        public static double CalculateCanopyCharacteristicThickness(
+            List<Mesh> treeCanopyMeshes)
+        {
+            if (treeCanopyMeshes == null || treeCanopyMeshes.Count == 0)
+                return 0.0;
+
+            var bbox = new BoundingBox();
+            foreach (var mesh in treeCanopyMeshes)
+            {
+                if (mesh != null && mesh.IsValid && mesh.Faces.Count > 0)
+                    bbox.Union(mesh.GetBoundingBox(false));
+            }
+            if (!bbox.IsValid)
+                return 0.0;
+
+            return Math.Max(0.0, bbox.Max.Z - bbox.Min.Z);
+        }
+
+        /// <summary>
+        /// Calculate decomposed view factors for the upper hemisphere (sky dome).
+        /// Decomposes the hemisphere into four mutually exclusive components:
+        /// - SVF: visible sky (no obstruction)
+        /// - TVF: tree canopy view factor (blocked by tree detail meshes)
+        /// - TRVF: translucent view factor (blocked by translucent shade meshes)
+        /// - OVF_opaque: opaque obstacle view factor (blocked by opaque objects only)
+        ///
+        /// PHYSICAL RATIONALE (2026-06-16):
+        /// For diffuse radiation calculation, each hemisphere direction is classified
+        /// by the nearest obstacle type encountered. Priority when overlapping:
+        /// Opaque &gt; TreeDetail &gt; TranslucentShade.
+        /// This ensures that directions blocked by both trees and buildings are
+        /// assigned to the opaque category (the building occludes the tree).
+        ///
+        /// Conservation: SVF + TVF + TRVF + OVF_opaque = 1.0
+        ///
+        /// These decomposed view factors enable precise diffuse radiation calculation:
+        /// DHI_eff = SVF*DHI + TVF*DHI*exp(-k_c*LAD*l) + TRVF*DHI*tau
+        /// </summary>
+        public static void CalculateDecomposedViewFactors(
+            Point3d analysisPoint,
+            ObstacleSet obstacleSet,
+            out double svf, out double tvf, out double trvf, out double ovfOpaque,
+            double analysisHeight = 1.5,
+            int sampleCount = 500,
+            double maxRayDistance = 500.0)
+        {
+            // Default values (no obstacles)
+            svf = 1.0;
+            tvf = 0.0;
+            trvf = 0.0;
+            ovfOpaque = 0.0;
+
+            if (obstacleSet == null || !obstacleSet.HasAnyObstacles)
+                return;
+
+            Point3d eyePoint = new Point3d(
+                analysisPoint.X, analysisPoint.Y, analysisPoint.Z + analysisHeight);
+
+            var directions = SolarGeometry.GenerateHemisphereDirections(sampleCount);
+
+            int skyRays = 0;
+            int treeRays = 0;
+            int translucentRays = 0;
+            int opaqueRays = 0;
+            int totalRays = directions.Count;
+
+            foreach (var dir in directions)
+            {
+                if (dir.Z < 0.001) continue;
+
+                Point3d rayOrigin = eyePoint + dir * 0.01;
+                Ray3d ray = new Ray3d(rayOrigin, dir);
+
+                // Priority: Opaque &gt; TreeDetail &gt; TranslucentShade
+                bool classified = false;
+
+                // STEP 1: Check opaque objects (absolute priority)
+                if (!classified && obstacleSet.OpaqueObjectMeshes != null)
+                {
+                    foreach (var mesh in obstacleSet.OpaqueObjectMeshes)
+                    {
+                        if (mesh == null || mesh.Faces.Count == 0) continue;
+                        double tHit = Intersection.MeshRay(mesh, ray);
+                        if (tHit > 0.001 && tHit < maxRayDistance)
+                        {
+                            opaqueRays++;
+                            classified = true;
+                            break;
+                        }
+                    }
+                }
+
+                // STEP 2: Check tree detail meshes
+                if (!classified && obstacleSet.TreeDetailMeshes != null)
+                {
+                    foreach (var mesh in obstacleSet.TreeDetailMeshes)
+                    {
+                        if (mesh == null || mesh.Faces.Count == 0) continue;
+                        double tHit = Intersection.MeshRay(mesh, ray);
+                        if (tHit > 0.001 && tHit < maxRayDistance)
+                        {
+                            treeRays++;
+                            classified = true;
+                            break;
+                        }
+                    }
+                }
+
+                // STEP 3: Check translucent shade meshes
+                if (!classified && obstacleSet.TranslucentShadeMeshes != null)
+                {
+                    foreach (var mesh in obstacleSet.TranslucentShadeMeshes)
+                    {
+                        if (mesh == null || mesh.Faces.Count == 0) continue;
+                        double tHit = Intersection.MeshRay(mesh, ray);
+                        if (tHit > 0.001 && tHit < maxRayDistance)
+                        {
+                            translucentRays++;
+                            classified = true;
+                            break;
+                        }
+                    }
+                }
+
+                // STEP 4: Unoccluded → sky
+                if (!classified)
+                    skyRays++;
+            }
+
+            if (totalRays > 0)
+            {
+                svf = (double)skyRays / totalRays;
+                tvf = (double)treeRays / totalRays;
+                trvf = (double)translucentRays / totalRays;
+                ovfOpaque = (double)opaqueRays / totalRays;
+            }
+        }
+
+        /// <summary>
+        /// Batch calculation of decomposed view factors (parallel).
+        /// Results are written into pre-allocated arrays.
+        /// </summary>
+        public static void CalculateDecomposedViewFactorsBatch(
+            List<Point3d> analysisPoints,
+            ObstacleSet obstacleSet,
+            double[] svfResults,
+            double[] tvfResults,
+            double[] trvfResults,
+            double[] ovfOpaqueResults,
+            double analysisHeight = 1.5,
+            int sampleCount = 500,
+            double maxRayDistance = 500.0)
+        {
+            int n = analysisPoints.Count;
+
+            if (svfResults == null || svfResults.Length < n)
+                throw new ArgumentException("svfResults must be pre-allocated with length >= analysisPoints.Count");
+            if (tvfResults == null || tvfResults.Length < n)
+                throw new ArgumentException("tvfResults must be pre-allocated with length >= analysisPoints.Count");
+            if (trvfResults == null || trvfResults.Length < n)
+                throw new ArgumentException("trvfResults must be pre-allocated with length >= analysisPoints.Count");
+            if (ovfOpaqueResults == null || ovfOpaqueResults.Length < n)
+                throw new ArgumentException("ovfOpaqueResults must be pre-allocated with length >= analysisPoints.Count");
+
+            if (obstacleSet == null || !obstacleSet.HasAnyObstacles)
+            {
+                for (int i = 0; i < n; i++)
+                {
+                    svfResults[i] = 1.0;
+                    tvfResults[i] = 0.0;
+                    trvfResults[i] = 0.0;
+                    ovfOpaqueResults[i] = 0.0;
+                }
+                return;
+            }
+
+            System.Threading.Tasks.Parallel.For(0, n, i =>
+            {
+                double s, t, tr, o;
+                CalculateDecomposedViewFactors(
+                    analysisPoints[i], obstacleSet,
+                    out s, out t, out tr, out o,
+                    analysisHeight, sampleCount, maxRayDistance);
+                svfResults[i] = s;
+                tvfResults[i] = t;
+                trvfResults[i] = tr;
+                ovfOpaqueResults[i] = o;
+            });
+        }
+
+        // ========================================================================
         // NEW: Full-spherical (4pi) view factor decomposition for MRT
         // ========================================================================
 
         /// <summary>
-        /// Calculate full-spherical (4pi) view factors for a single point.
+        /// [ENHANCED] Calculate full-spherical (4pi) view factors with ObstacleSet.
+        /// Decomposes the entire sphere into FIVE components:
+        ///   - SVF: Sky View Factor (visible sky, Z &gt; 0, no obstacle)
+        ///   - GVF: Ground View Factor (visible ground, Z &lt; 0, no obstacle)
+        ///   - OVF_opaque: Opaque Obstacle View Factor (blocked by opaque objects only)
+        ///   - TVF: Tree View Factor (blocked by tree detail meshes, no opaque overlap)
+        ///   - TRVF: Translucent View Factor (blocked by translucent shade meshes)
+        /// Conservation: SVF + GVF + OVF_opaque + TVF + TRVF = 1.0
+        ///
+        /// ENHANCED (2026-06-16): OVF is now decomposed into OVF_opaque only.
+        /// TVF and TRVF are separated for precise diffuse radiation calculation.
+        /// Priority for overlapping obstacles: Opaque &gt; TreeDetail &gt; TranslucentShade.
+        /// </summary>
+        public static void CalculateSphericalViewFactors(
+            Point3d analysisPoint,
+            ObstacleSet obstacleSet,
+            out double svf, out double gvf, out double ovfOpaque, out double tvf, out double trvf,
+            double analysisHeight = 1.5,
+            int sampleCount = 1000,
+            double maxRayDistance = 500.0)
+        {
+            svf = 0.5;
+            gvf = 0.5;
+            ovfOpaque = 0.0;
+            tvf = 0.0;
+            trvf = 0.0;
+
+            Point3d eyePoint = new Point3d(
+                analysisPoint.X, analysisPoint.Y, analysisPoint.Z + analysisHeight);
+
+            var directions = SolarGeometry.GenerateSphereDirections(sampleCount);
+
+            if (obstacleSet == null || !obstacleSet.HasAnyObstacles)
+                return;
+
+            int skyRays = 0;
+            int groundRays = 0;
+            int opaqueRays = 0;
+            int treeRays = 0;
+            int translucentRays = 0;
+            int totalRays = 0;
+
+            foreach (var dir in directions)
+            {
+                Point3d rayOrigin = eyePoint + dir * 0.01;
+                Ray3d ray = new Ray3d(rayOrigin, dir);
+
+                // Priority: Opaque &gt; TreeDetail &gt; TranslucentShade
+                bool classified = false;
+
+                // STEP 1: Check opaque objects (absolute priority)
+                if (obstacleSet.OpaqueObjectMeshes != null)
+                {
+                    foreach (var mesh in obstacleSet.OpaqueObjectMeshes)
+                    {
+                        if (mesh == null || mesh.Faces.Count == 0) continue;
+                        double tHit = Intersection.MeshRay(mesh, ray);
+                        if (tHit > 0.001 && tHit < maxRayDistance)
+                        {
+                            opaqueRays++;
+                            classified = true;
+                            break;
+                        }
+                    }
+                }
+
+                // STEP 2: Check tree detail meshes
+                if (!classified && obstacleSet.TreeDetailMeshes != null)
+                {
+                    foreach (var mesh in obstacleSet.TreeDetailMeshes)
+                    {
+                        if (mesh == null || mesh.Faces.Count == 0) continue;
+                        double tHit = Intersection.MeshRay(mesh, ray);
+                        if (tHit > 0.001 && tHit < maxRayDistance)
+                        {
+                            treeRays++;
+                            classified = true;
+                            break;
+                        }
+                    }
+                }
+
+                // STEP 3: Check translucent shade meshes
+                if (!classified && obstacleSet.TranslucentShadeMeshes != null)
+                {
+                    foreach (var mesh in obstacleSet.TranslucentShadeMeshes)
+                    {
+                        if (mesh == null || mesh.Faces.Count == 0) continue;
+                        double tHit = Intersection.MeshRay(mesh, ray);
+                        if (tHit > 0.001 && tHit < maxRayDistance)
+                        {
+                            translucentRays++;
+                            classified = true;
+                            break;
+                        }
+                    }
+                }
+
+                totalRays++;
+                if (classified)
+                    continue; // Already counted in obstacle category
+                else if (dir.Z > 0.001)
+                    skyRays++;
+                else if (dir.Z < -0.001)
+                    groundRays++;
+            }
+
+            if (totalRays > 0)
+            {
+                svf = (double)skyRays / totalRays;
+                gvf = (double)groundRays / totalRays;
+                ovfOpaque = (double)opaqueRays / totalRays;
+                tvf = (double)treeRays / totalRays;
+                trvf = (double)translucentRays / totalRays;
+            }
+        }
+
+        /// <summary>
+        /// Batch full-spherical view factor calculation with ObstacleSet (parallel, 5-component).
+        /// ENHANCED (2026-06-16): Returns decomposed OVF_opaque, TVF, TRVF separately.
+        /// </summary>
+        public static void CalculateSphericalViewFactorsBatch(
+            List<Point3d> analysisPoints,
+            ObstacleSet obstacleSet,
+            double[] svfResults,
+            double[] gvfResults,
+            double[] ovfOpaqueResults,
+            double[] tvfResults,
+            double[] trvfResults,
+            double analysisHeight = 1.5,
+            int sampleCount = 1000,
+            double maxRayDistance = 500.0)
+        {
+            int n = analysisPoints.Count;
+
+            if (svfResults == null || svfResults.Length < n) throw new ArgumentException("svfResults must be pre-allocated");
+            if (gvfResults == null || gvfResults.Length < n) throw new ArgumentException("gvfResults must be pre-allocated");
+            if (ovfOpaqueResults == null || ovfOpaqueResults.Length < n) throw new ArgumentException("ovfOpaqueResults must be pre-allocated");
+            if (tvfResults == null || tvfResults.Length < n) throw new ArgumentException("tvfResults must be pre-allocated");
+            if (trvfResults == null || trvfResults.Length < n) throw new ArgumentException("trvfResults must be pre-allocated");
+
+            if (obstacleSet == null || !obstacleSet.HasAnyObstacles)
+            {
+                for (int i = 0; i < n; i++)
+                {
+                    svfResults[i] = 0.5;
+                    gvfResults[i] = 0.5;
+                    ovfOpaqueResults[i] = 0.0;
+                    tvfResults[i] = 0.0;
+                    trvfResults[i] = 0.0;
+                }
+                return;
+            }
+
+            System.Threading.Tasks.Parallel.For(0, n, i =>
+            {
+                double s, g, o, t, tr;
+                CalculateSphericalViewFactors(
+                    analysisPoints[i], obstacleSet,
+                    out s, out g, out o, out t, out tr,
+                    analysisHeight, sampleCount, maxRayDistance);
+                svfResults[i] = s;
+                gvfResults[i] = g;
+                ovfOpaqueResults[i] = o;
+                tvfResults[i] = t;
+                trvfResults[i] = tr;
+            });
+        }
+
+        /// <summary>
+        /// [LEGACY] Calculate full-spherical (4pi) view factors using flat mesh list.
+        /// OVF includes ALL obstacle types (opaque + tree + translucent combined).
+        /// For decomposed view factors with separate TVF/TRVF, use the ObstacleSet overload.
+        ///
         /// Decomposes the entire sphere into three components:
         ///   - SVF: Sky View Factor (visible sky)
         ///   - GVF: Ground View Factor (visible ground)
-        ///   - OVF: Obstacle View Factor (blocked by obstacles)
+        ///   - OVF: Obstacle View Factor (blocked by any obstacles)
         /// Conservation: SVF + GVF + OVF = 1.0
         /// </summary>
         public static void CalculateSphericalViewFactors(

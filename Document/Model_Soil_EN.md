@@ -17,6 +17,12 @@ The module provides two simulators:
 
 **Enhanced (2026-06-15):** Corrected DNI physics — when a ray intersects multiple non-opaque obstacle types, the DNI contribution is the **product** of individual contributions from each (or multiple same-type) obstacle, rather than considering only the nearest occlusion from the sun direction. Added independent ObsSet input (index 2) to SpatialSoilThermalSimulator; ObsSet input removed from GroundSettings. ObsSet input is **no longer backward-compatible**, only accepts ObstacleSet encapsulated data.
 
+**Enhanced (2026-06-16):** 
+1. Decomposed view factors (TVF/TRVF) for precise diffuse radiation calculation. OVF is now opaque-only.
+2. Longwave radiation uses decomposed surface temperatures (T_opaque, T_canopy, T_translucent) from ObsSet component instead of single T_sur.
+
+**Enhanced (2026-06-16):** Decomposed view factors for precise diffuse radiation calculation. The effective diffuse irradiance now accounts for partial transmission through tree canopies (Beer-Lambert law) and translucent materials. OVF is now opaque-only.
+
 **Enhanced (2026-06-14):** The spatial simulator introduces fine-grained Direct Normal Irradiance (DNI) exposure factor calculation, replacing the original binary exposure factor $f_{\text{exp}}$. Through the classified Obstacle Set (ObstacleSet), it supports differentiated transmission through three obstacle types: opaque objects (full block), trees (Beer-Lambert canopy transmission), and translucent sunshades (fixed transmittance), achieving more accurate shortwave radiation calculation.
 
 ---
@@ -401,7 +407,25 @@ The spatial simulator applies per-point radiation corrections using sky view fac
 
 ### 10.1 Corrected Shortwave (GHI)
 
-$$GHI_{\text{actual}} = DHI \cdot SVF + DNI \cdot \sin(\alpha) \cdot f_{\text{DNI}} + \rho_{\text{sur}} \cdot GHI_{\text{surround}} \cdot (1 - SVF)$$
+$$GHI_{\text{actual}} = DHI_{\text{eff}} + DNI \cdot \sin(\alpha) \cdot f_{\text{DNI}} + \rho_{\text{sur}} \cdot GHI_{\text{surround}} \cdot (1 - SVF)$$
+
+**ENHANCED (2026-06-16): Effective Diffuse Radiation with Decomposed View Factors**
+
+The diffuse radiation term is now computed using decomposed view factors for precise handling of tree canopies and translucent materials:
+
+$$DHI_{\text{eff}} = DHI \cdot \left( SVF + TVF \cdot e^{-k_c \cdot \text{LAD} \cdot l} + TRVF \cdot \tau \right)$$
+
+Where:
+- $TVF$: Tree View Factor — fraction of sky hemisphere blocked by tree detail meshes
+- $TRVF$: Translucent View Factor — fraction blocked by translucent shade meshes
+- $SVF$: Sky View Factor (unchanged) — visible sky fraction
+- $e^{-k_c \cdot \text{LAD} \cdot l}$: Beer-Lambert canopy transmission factor
+- $\tau$: Shortwave transmittance of translucent shade material
+- $l$: Characteristic canopy thickness [m], computed from TreeCanopyMeshes bounding box Z-extent
+
+**Conservation:** $SVF + TVF + TRVF + OVF_{\text{opaque}} = 1.0$ (upper hemisphere)
+
+**Note:** $OVF_{\text{opaque}}$ (opaque obstacle view factor) is the remaining fraction blocked by opaque objects only (previously included all obstacle types).
 
 where:
 
@@ -438,10 +462,11 @@ Where:
 **Computation Pipeline (SpatialSoilThermalSimulator.cs):**
 
 1. Read classified obstacle set from `GroundSurfaceConfig.ObstacleSet`
-2. Assemble SVF-specific mesh list (Opaque + TreeDetail + TranslucentShade, **excluding TreeCanopy**) for SVF calculation; TreeCanopy is used only for Beer-Lambert path-length in DNI
+2. Compute **decomposed view factors** (SVF, TVF, TRVF, OVF_opaque) using `CalculateDecomposedViewFactorsBatch()`
 3. For each time step and each ground point, call `CalculateDNIExposureFactorsBatch()` to compute $f_{\text{DNI}}$
-4. Substitute $f_{\text{DNI}}$ into the shortwave radiation correction formula to compute $GHI_{\text{actual}}$
-5. The corrected $GHI_{\text{actual}}$ drives the Force-Restore + Penman-Monteith simulation
+4. Compute effective diffuse radiation $DHI_{\text{eff}}$ using decomposed view factors with Beer-Lambert canopy transmission and translucent transmittance
+5. Substitute $f_{\text{DNI}}$ and $DHI_{\text{eff}}$ into the shortwave radiation correction formula to compute $GHI_{\text{actual}}$
+6. The corrected $GHI_{\text{actual}}$ drives the Force-Restore + Penman-Monteith simulation
 
 **ObsSet Not Connected:** When the ObsSet component is not connected (no obstacle classification), the traditional `CalculateExposureFactorsBatch()` method is used, with $f_{\text{DNI}} = f_{\text{exp}}$. **SVF Calculation Mesh Selection:** When an ObstacleSet is connected, SVF calculation uses only Opaque + TreeDetail + TranslucentShade meshes for physical occlusion. TreeCanopy meshes (simplified shrinkwrap envelopes) are **excluded from SVF** — they participate only in Beer-Lambert path-length calculation for DNI transmission.
 
@@ -449,13 +474,24 @@ Where:
 
 $$L_{\downarrow}^{\text{actual}} = L_{\text{sky}} \cdot SVF + \varepsilon_{\text{sur}} \cdot \sigma \cdot T_{\text{sur,K}}^4 \cdot (1 - SVF)$$
 
+**Temperature Input via ObsSet Component:**
+The longwave surround term now uses decomposed temperatures from the ObsSet component:
+
+$$L_{	ext{surround}} = \varepsilon_{	ext{sur}} \cdot \sigma \cdot \left[ T_{	ext{obs}}^4 \cdot OVF_{	ext{opaque}} + T_{	ext{canopy}}^4 \cdot TVF + T_{	ext{translucent}}^4 \cdot TRVF \right]$$
+
+Where $T_{	ext{obs}}$, $T_{	ext{canopy}}$, and $T_{	ext{translucent}}$ are surface temperatures for opaque obstacles, tree canopy, and translucent shade respectively, obtained from the ObsSet component (fallback to EPW air temperature if not set).
+
+**Note:** The surround longwave term, which includes all non-sky directions (opaque obstacles, trees, and translucent materials). This is physically correct because all non-sky surfaces contribute to the surrounding longwave radiation received at ground level.
+
 where:
 
 $$L_{\text{sky}} = HIR_{\text{EPW}} \cdot SVF$$
 
 | Parameter | Symbol | Unit | Default | Description |
 |-----------|--------|------|---------|-------------|
-| Sky View Factor | $SVF$ | -- | 1.0 (no obstacles) | [0, 1]; fraction of sky hemisphere visible |
+| Sky View Factor | $SVF$ | -- | 1.0 (no obstacles) | [0, 1]; visible sky fraction |
+| Tree View Factor | $TVF$ | -- | 0.0 | [0, 1]; fraction blocked by tree detail meshes (NEW 2026-06-16) |
+| Translucent View Factor | $TRVF$ | -- | 0.0 | [0, 1]; fraction blocked by translucent shade meshes (NEW 2026-06-16) |
 | Effective DNI exposure factor | $f_{\text{DNI}}$ | -- | -- | [0, 1]; DNI effective factor combining exposure and transmission |
 | Solar exposure factor | $f_{\text{exp}}$ | -- | -- | [0, 1]; binary: fraction of direct sun unobstructed (legacy) |
 | Solar altitude | $\alpha$ | rad | -- | From SPA solar position |

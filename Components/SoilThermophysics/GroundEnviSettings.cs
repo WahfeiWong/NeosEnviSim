@@ -47,8 +47,7 @@ namespace SoilThermophysics
           : base("Ground Settings", "GroundSet",
               "Converts ground Brep/Surface to mesh + analysis points, " +
               "and encapsulates ground geometry and environment parameters. " +
-              "Outputs GroundSet for SpatialSoilThermalSimulator. " +
-              "Note: ObsSet input removed (2026-06-15). Connect ObsSet directly to SpSoilSim.",
+              "Outputs GroundSet for SpatialSoilThermalSimulator. ", 
               "Neos", "Thermophysics")
         {
         }

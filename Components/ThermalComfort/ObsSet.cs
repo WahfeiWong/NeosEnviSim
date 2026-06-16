@@ -33,70 +33,69 @@ namespace ThermalComfort
 
         protected override void RegisterInputParams(GH_InputParamManager pManager)
         {
-            // (0) Tree detail meshes — detailed tree geometry for ray-hit detection
+            // ---- Tree-related parameters ----
             pManager.AddMeshParameter("Tree Detail", "TreeDet",
                 "Optional: Detailed tree geometry mesh (leaves, branches) from Tree Processor. " +
                 "When a solar ray hits this mesh, the point is shaded but DNI is partially " +
                 "transmitted through the canopy via Beer-Lambert law.",
                 GH_ParamAccess.list);
-
-            // (1) Tree canopy meshes — simplified canopy envelopes for path-length calculation
             pManager.AddMeshParameter("Tree Canopy", "TreeCan",
                 "Optional: Simplified tree canopy envelope mesh(es) from Tree Processor. " +
                 "Used to compute the geometric path length s [m] through vegetation " +
                 "along the solar ray direction (entry-to-exit intersection distance).",
                 GH_ParamAccess.list);
-
-            // (2) Leaf Area Density (LAD)
             pManager.AddNumberParameter("Leaf Area Density", "LAD",
-                "Leaf Area Density (LAD) [m²/m³]. Leaf area per unit volume of canopy.\n" +
-                "Default 1.0. Typical range: 0.5–8.0 depending on species and season." +
-                "\nThe internal code limits the range of LAD to 0.01–50.",
+                "Leaf Area Density (LAD) [m2/m3]. Leaf area per unit volume of canopy. " +
+                "Default 1.0. Typical range: 0.5-8.0.",
                 GH_ParamAccess.item, 1.0);
-
-            // (3) Extinction coefficient k
             pManager.AddNumberParameter("Extinction Coeff", "k",
-                "Solar radiation extinction coefficient k [-] for Beer-Lambert law.\n" +
-                "Default 0.5. Typical range: 0.5–0.8 (broadleaf), 0.3–0.5 (conifer).\n" +
-                "Equation: I_t = I_DN * exp(-k * LAD * s)." +
-                "\nThe internal code limits the range of k to 0.01–1.",
+                "Solar radiation extinction coefficient k [-] for Beer-Lambert law. " +
+                "Default 0.5. Typical range: 0.5-0.8 (broadleaf), 0.3-0.5 (conifer).",
                 GH_ParamAccess.item, 0.5);
+            pManager.AddNumberParameter("Tree Temperature", "T_tree",
+                "Optional: Tree canopy surface temperature [C]. Single value or 8760 values (hourly). " +
+                "If omitted, EPW air temperature is used as fallback in downstream components." +
+                "\nThis parameter is not read by the RadSim component; it is used solely for the MRT and soil thermal modules.",
+                GH_ParamAccess.list);
 
-            // (4) Translucent sunshade meshes
+            // ---- Translucent shade parameters ----
             pManager.AddMeshParameter("Translucent Shade", "TransShade",
                 "Optional: Translucent sunshade / shading device mesh(es). " +
                 "These materials partially transmit direct solar radiation " +
                 "according to the transmittance parameter.",
                 GH_ParamAccess.list);
-
-            // (5) Translucent transmittance
             pManager.AddNumberParameter("Transmittance", "τ",
                 "Direct solar radiation transmittance of translucent sunshades [-]. " +
                 "Default 0.05. Range: 0.0 (opaque) to 1.0 (fully transparent). " +
-                "Typical: perforated metal 0.05–0.15, fabric 0.02–0.30, PC (Polycarbonate) sheet 0.60–0.85.",
+                "Typical: perforated metal 0.05-0.15, fabric 0.02-0.30, PC sheet 0.60-0.85.",
                 GH_ParamAccess.item, 0.05);
+            pManager.AddNumberParameter("Translucent Temperature", "T_trans",
+                "Optional: Translucent shade surface temperature [C]. Single value or 8760 values (hourly). " +
+                "If omitted, EPW air temperature is used as fallback in downstream components." +
+                "\nThis parameter is not read by the RadSim component; it is used solely for the MRT and soil thermal modules.",
+                GH_ParamAccess.list);
 
-            // (6) Opaque object meshes
+            // ---- Opaque obstacle parameters ----
             pManager.AddMeshParameter("Opaque Objects", "Opaque",
                 "Optional: Opaque obstacle meshes (buildings, walls, solid structures). " +
                 "These fully block direct solar radiation with no transmission.",
                 GH_ParamAccess.list);
+            pManager.AddNumberParameter("Opaque Temperature", "T_opaque",
+                "Optional: Opaque obstacle surface temperature [C]. Single value or 8760 values (hourly). " +
+                "If omitted, EPW air temperature is used as fallback in downstream components." +
+                "\nThis parameter is not read by the RadSim component; it is used solely for the MRT and soil thermal modules.",
+                GH_ParamAccess.list);
 
             // Make all inputs optional
-            pManager[0].Optional = true;
-            pManager[1].Optional = true;
-            pManager[2].Optional = true;
-            pManager[3].Optional = true;
-            pManager[4].Optional = true;
-            pManager[5].Optional = true;
-            pManager[6].Optional = true;
+            for (int i = 0; i < 10; i++)
+                pManager[i].Optional = true;
         }
 
         protected override void RegisterOutputParams(GH_OutputParamManager pManager)
         {
             pManager.AddGenericParameter("Obstacle Set", "ObsSet",
-                "Classified obstacle set for MRT component. Encapsulates opaque buildings, " +
-                "trees with canopy transmission, and translucent sunshades.",
+                "Classified obstacle set encapsulating opaque buildings, trees with canopy transmission, " +
+                "translucent sunshades, and surface temperatures for each obstacle type.",
                 GH_ParamAccess.item);
         }
 
@@ -110,14 +109,20 @@ namespace ThermalComfort
             List<Mesh> translucentShadeMeshes = new List<Mesh>();
             double translucentTransmittance = 0.05;
             List<Mesh> opaqueObjectMeshes = new List<Mesh>();
+            List<double> treeTemps = new List<double>();
+            List<double> translucentTemps = new List<double>();
+            List<double> opaqueTemps = new List<double>();
 
             DA.GetDataList(0, treeDetailMeshes);
             DA.GetDataList(1, treeCanopyMeshes);
             DA.GetData(2, ref leafAreaDensity);
             DA.GetData(3, ref extinctionCoefficient);
-            DA.GetDataList(4, translucentShadeMeshes);
-            DA.GetData(5, ref translucentTransmittance);
-            DA.GetDataList(6, opaqueObjectMeshes);
+            DA.GetDataList(4, treeTemps);
+            DA.GetDataList(5, translucentShadeMeshes);
+            DA.GetData(6, ref translucentTransmittance);
+            DA.GetDataList(7, translucentTemps);
+            DA.GetDataList(8, opaqueObjectMeshes);
+            DA.GetDataList(9, opaqueTemps);
 
             // Validate and clamp parameters
             leafAreaDensity = Math.Max(0.01, Math.Min(50.0, leafAreaDensity));
@@ -130,7 +135,7 @@ namespace ThermalComfort
             translucentShadeMeshes = FilterValidMeshes(translucentShadeMeshes);
             opaqueObjectMeshes = FilterValidMeshes(opaqueObjectMeshes);
 
-            // Build ObstacleSet
+            // Build ObstacleSet with temperatures
             var obstacleSet = new ObstacleSet
             {
                 TreeDetailMeshes = treeDetailMeshes,
@@ -142,6 +147,22 @@ namespace ThermalComfort
                 OpaqueObjectMeshes = opaqueObjectMeshes
             };
 
+            // Store temperatures: single value → scalar, 8760 values → hourly list
+            if (treeTemps.Count >= 8760)
+                obstacleSet.HourlyTreeCanopyTemperatures = treeTemps;
+            else if (treeTemps.Count > 0)
+                obstacleSet.TreeCanopyTemperature = treeTemps[0];
+
+            if (translucentTemps.Count >= 8760)
+                obstacleSet.HourlyTranslucentSurfaceTemperatures = translucentTemps;
+            else if (translucentTemps.Count > 0)
+                obstacleSet.TranslucentSurfaceTemperature = translucentTemps[0];
+
+            if (opaqueTemps.Count >= 8760)
+                obstacleSet.HourlySurroundingSurfaceTemperatures = opaqueTemps;
+            else if (opaqueTemps.Count > 0)
+                obstacleSet.SurroundingSurfaceTemperature = opaqueTemps[0];
+
             // Summary message
             int totalMeshes = treeDetailMeshes.Count + treeCanopyMeshes.Count +
                               translucentShadeMeshes.Count + opaqueObjectMeshes.Count;
@@ -151,7 +172,10 @@ namespace ThermalComfort
                     $"ObsSet: {totalMeshes} meshes — " +
                     $"TreeDet={treeDetailMeshes.Count}, TreeCan={treeCanopyMeshes.Count}, " +
                     $"TransShd={translucentShadeMeshes.Count}, Opaque={opaqueObjectMeshes.Count} | " +
-                    $"LAD={leafAreaDensity:F2}, k={extinctionCoefficient:F2}, τ={translucentTransmittance:F3}");
+                    $"LAD={leafAreaDensity:F2}, k={extinctionCoefficient:F2}, tau={translucentTransmittance:F3} | " +
+                    $"Ttree={(treeTemps.Count > 0 ? (treeTemps.Count >= 8760 ? "8760h" : $"{treeTemps[0]:F1}C") : "auto")}, " +
+                    $"Ttrans={(translucentTemps.Count > 0 ? (translucentTemps.Count >= 8760 ? "8760h" : $"{translucentTemps[0]:F1}C") : "auto")}, " +
+                    $"Topaque={(opaqueTemps.Count > 0 ? (opaqueTemps.Count >= 8760 ? "8760h" : $"{opaqueTemps[0]:F1}C") : "auto")}");
             }
             else
             {

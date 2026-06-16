@@ -2,6 +2,8 @@
 
 本模块包含从太阳辐射计算到光伏系统发电量估算的完整模拟链，涵盖太阳几何计算、天空散射模型、双面光伏模型、组件温度模型以及逆变器/MPPT模型，基于EPW气象数据进行逐时性能模拟。
 
+**增强版（2026-06-16）：** 分解视角因子（TVF/TRVF）实现精细化漫射辐射计算。OVF 现为仅不透光障碍物。有效漫射辐射公式考虑树冠层 Beer-Lambert 透射和半透明材料透射。
+
 **增强版（2026-06-15）：** RadSim 组件的障碍物输入（索引 1）由 Brep List 改为 ObstacleSet 封装数据，实现与 SpatialSoilThermalSimulator 和 Outdoor MRT 组件一致的精细化 DNI 计算。当射线同时穿过多种非 Opaque 障碍物时，各项透射率**相乘**（Beer-Lambert 冠层透射 + 半透明遮阳透射）。ObsSet 输入端**不再向后兼容**，仅接受 ObstacleSet 类型数据。
 
 ---
@@ -70,7 +72,59 @@ $$z_i = 1 - \frac{2i + 1}{N}, \quad r_i = \sqrt{1 - z_i^2}, \quad \theta_i = \ph
 
 ---
 
-## 2. Perez 天空散射模型（PerezSkyModel.cs）
+## 2. 分解视角因子与有效漫射辐射（HumanExposureModel.cs）
+
+### 2.1 物理基础
+
+**增强版（2026-06-16）：** 为准确模拟植被和半透明遮阳对漫射辐射的影响，将传统单一 SVF 方法扩展为四个互斥的分解视角因子：
+
+| 视角因子 | 符号 | 说明 |
+|:---:|:---:|:---|
+| 天空视角因子 | $F_{\text{SVF}}$ | 可见天空方向（无遮挡） |
+| 不透光障碍物视角因子 | $F_{\text{OVF,opaque}}$ | 仅被不透光物体遮挡的方向 |
+| 树木视角因子 | $F_{\text{TVF}}$ | 被树木细节网格遮挡的方向 |
+| 半透明视角因子 | $F_{\text{TRVF}}$ | 被半透明遮阳网格遮挡的方向 |
+
+**守恒关系：**
+
+$$F_{\text{SVF}} + F_{\text{OVF,opaque}} + F_{\text{TVF}} + F_{\text{TRVF}} = 1.0 \quad \text{（上半球）}$$
+
+**重叠判定优先级：** 当射线方向同时与多种障碍物相交时，优先级为：**不透光 > 树木细节 > 半透明遮阳**。确保同时被建筑和树木遮挡的方向被分配到不透光类别。
+
+### 2.2 有效漫射辐照度
+
+倾斜面上的有效漫射辐照度考虑树冠层和半透明材料的部分透射：
+
+$$I_{\text{DH,eff}} = I_{\text{DH,base}} \cdot \left( F_{\text{SVF}} + F_{\text{TVF}} \cdot e^{-k_c \cdot \text{LAD} \cdot l} + F_{\text{TRVF}} \cdot \tau \right)$$
+
+其中：
+- $I_{\text{DH,base}}$：全半球漫射辐照度（各向同性或Perez） [W/m²]
+- $k_c$：树冠消光系数 [-]
+- $\text{LAD}$：叶面积密度 [m²/m³]
+- $l$：特征树冠厚度 [m]，取所有 TreeCanopyMeshes 包围盒的 Z 轴范围
+- $\tau$：半透明遮阳材料短波透射率 [-]
+- $e^{-k_c \cdot \text{LAD} \cdot l}$：Beer-Lambert 树冠透射因子
+
+**特征树冠厚度：**
+
+$$l = \max(0, \; Z_{\max} - Z_{\min})$$
+
+### 2.3 SVF-OVF 定义变更
+
+- **SVF 不变**：仍表示可见天空比例
+- **OVF 现为仅不透光障碍物**（此前包含所有障碍物类型）
+
+**变更前（旧版）：**
+- OVF = 不透光 + 树木 + 半透明（所有障碍物合并）
+
+**变更后（增强版）：**
+- OVF_opaque = 仅不透光物体
+- TVF = 树木细节网格
+- TRVF = 半透明遮阳网格
+
+---
+
+## 3. Perez 天空散射模型（PerezSkyModel.cs）
 
 基于 Perez, Ineichen 等人（1987, 1990）的天空各向异性散射模型。
 
@@ -123,9 +177,9 @@ $$F_2 = \max(0,\; f_{21} + f_{22} \cdot \Delta + f_{23} \cdot Z_{\text{rad}}) \c
 
 ---
 
-## 3. 双面光伏模型（BifacialModel.cs）
+## 4. 双面光伏模型（BifacialModel.cs）
 
-### 3.1 背面辐照度
+### 7.1 背面辐照度
 
 $$I_{\text{rear}} = \big( I_{\text{GH}} \cdot \rho_g \cdot F_{r \to g} \cdot S_f + I_{\text{DH}} \cdot F_{r \to \text{sky}} \cdot F_{\text{SVF,rear}} \big) \cdot f_{\text{rg}}$$
 
@@ -141,7 +195,7 @@ $$S_f = \frac{1}{1 + 0.5 \cdot (H / D) \cdot \sin\beta}$$
 
 其中 $H$ 为组件安装高度，$D$ 为行间距。结果被约束在 [0.1, 1.0]。
 
-### 3.2 双面增益功率
+### 7.2 双面增益功率
 
 $$P_{\text{rear}} = I_{\text{rear}} \cdot A_{\text{gross}} \cdot \phi_{\text{active}} \cdot \eta_{\text{front}} \cdot \phi_{\text{bifacial}}$$
 
@@ -151,7 +205,7 @@ $$P_{\text{rear}} = I_{\text{rear}} \cdot A_{\text{gross}} \cdot \phi_{\text{act
 - $\eta_{\text{front}}$：温度修正后的正面效率
 - $\phi_{\text{bifacial}}$：双面系数（默认 0.7）
 
-### 3.3 双面增益比
+### 5.3 双面增益比
 
 $$\text{BG} = \frac{I_{\text{rear}}}{I_{\text{front}}} \cdot \phi_{\text{bifacial}}$$
 
@@ -159,7 +213,7 @@ $$\text{BG} = \frac{I_{\text{rear}}}{I_{\text{front}}} \cdot \phi_{\text{bifacia
 
 ## 4. 光伏组件温度模型（PVTemperatureModel.cs）
 
-### 4.1 Faiman 模型（优先使用）
+### 7.1 Faiman 模型（优先使用）
 
 $$T_{\text{cell}} = T_a + \frac{I_{\text{POA}}}{U_0 + U_1 \cdot v_w}$$
 
@@ -178,7 +232,7 @@ $$T_{\text{cell}} = T_a + \frac{I_{\text{POA}}}{U_0 + U_1 \cdot v_w}$$
 | BuildingIntegrated（BIPV） | 15.0 | 4.50 |
 | Concentrator（聚光） | 30.0 | 8.00 |
 
-### 4.2 NOCT 模型（无风速时回退）
+### 7.2 NOCT 模型（无风速时回退）
 
 $$T_{\text{cell}} = T_a + \frac{(\text{NOCT} - 20)}{800} \cdot I_{\text{POA}} \cdot R_{\text{thermal}}$$
 
@@ -188,7 +242,7 @@ $$R_{\text{thermal}} = \frac{1 - \eta}{1 - \eta_{\text{ref}}}$$
 
 $\eta_{\text{ref}}$ 为NOCT测试时的参考效率（默认 0.10），结果被约束在 [0.5, 2.0]。
 
-### 4.3 Sandia 温度模型
+### 5.3 Sandia 温度模型
 
 $$T_{\text{module}} = T_a + I_{\text{POA}} \cdot e^{a + b \cdot v_w}$$
 
@@ -196,7 +250,7 @@ $$T_{\text{cell}} = T_{\text{module}} + \frac{I_{\text{POA}}}{1000} \cdot \Delta
 
 默认参数：$a = -3.47$，$b = -0.0594$，$\Delta T = 3$ °C。
 
-### 4.4 温度修正效率
+### 5.4 温度修正效率
 
 $$\eta(T) = \eta_{\text{STC}} \cdot \big[ 1 + \gamma \cdot (T_{\text{cell}} - T_{\text{STC}}) \big]$$
 
@@ -204,9 +258,9 @@ $$\eta(T) = \eta_{\text{STC}} \cdot \big[ 1 + \gamma \cdot (T_{\text{cell}} - T_
 
 ---
 
-## 5. 逆变器与MPPT模型（InverterMPPTModel.cs）
+## 6. 逆变器与MPPT模型（InverterMPPTModel.cs）
 
-### 5.1 PVWatts 逆变器模型
+### 7.1 PVWatts 逆变器模型
 
 基于 Dobos（2014）的 PVWatts Version 5 模型。
 
@@ -224,7 +278,7 @@ $$P_{\text{ac}} = P_{\text{dc}} \cdot \eta_{\text{op}}$$
 
 **夜间待机损耗：** 若输出 $<$ TareLoss，则输出置 0。
 
-### 5.2 组串电压计算
+### 7.2 组串电压计算
 
 $$V_{\text{string}} = N_s \cdot V_{\text{mp}} \cdot \big[1 + \gamma_V \cdot (T_{\text{cell}} - 25)\big]$$
 
@@ -234,9 +288,9 @@ MPPT窗口检查：若 $V_{\text{string}} < V_{\text{min}}$ 或 $V_{\text{string
 
 ---
 
-## 6. 辐射模拟引擎（NeosRadSim.cs）
+## 7. 辐射模拟引擎（NeosRadSim.cs）
 
-### 6.1 输入参数
+### 7.1 输入参数
 
 **变更（2026-06-15）：** 索引 1 的障碍物输入由 `Brep List` 改为 `ObstacleSet`（ObsSet），实现精细化 DNI 透射计算。后续输入端索引不变。
 
@@ -258,7 +312,7 @@ MPPT窗口检查：若 $V_{\text{string}} < V_{\text{min}}$ 或 $V_{\text{string
 | 13 | Output Folder | Text | 结果输出文件夹 |
 | 14 | Run | Boolean | 执行开关 |
 
-### 6.2 输出结果（6个分类文件）
+### 7.2 输出结果（6个分类文件）
 
 | 文件 | 内容 |
 |:---:|:---|
@@ -269,7 +323,7 @@ MPPT窗口检查：若 $V_{\text{string}} < V_{\text{min}}$ 或 $V_{\text{string
 | DCResult.txt | 逐时/累计DC发电量（正面/背面） |
 | ACResult.txt | 逐时/累计AC发电量（正面/背面） |
 
-### 6.3 模拟流程
+### 7.3 模拟流程
 
 1. 读取EPW气象数据 → 解析经纬度、时区、高程
 2. 读取 ObsSet（如连接）→ 获取分类障碍物数据（Opaque/Tree/Translucent）

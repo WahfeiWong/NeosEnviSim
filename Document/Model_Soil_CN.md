@@ -401,7 +401,25 @@ $$ET_{\text{ref}} = \frac{1}{\lambda(T_{\text{air}})} \cdot \frac{\Delta \cdot (
 
 ### 10.1 修正短波辐射 (GHI)
 
-$$GHI_{\text{actual}} = DHI \cdot SVF + DNI \cdot \sin(\alpha) \cdot f_{\text{DNI}} + \rho_{\text{sur}} \cdot GHI_{\text{surround}} \cdot (1 - SVF)$$
+$$GHI_{\text{actual}} = DHI_{\text{eff}} + DNI \cdot \sin(\alpha) \cdot f_{\text{DNI}} + \rho_{\text{sur}} \cdot GHI_{\text{surround}} \cdot (1 - SVF)$$
+
+**增强版（2026-06-16）：分解视角因子的有效漫射辐射**
+
+漫射辐射项现使用分解视角因子精确处理树冠层和半透明材料：
+
+$$DHI_{\text{eff}} = DHI \cdot \left( SVF + TVF \cdot e^{-k_c \cdot \text{LAD} \cdot l} + TRVF \cdot \tau \right)$$
+
+其中：
+- $TVF$：树木视角因子——被树木细节网格遮挡的天空半球比例
+- $TRVF$：半透明视角因子——被半透明遮阳网格遮挡的比例
+- $SVF$：天空视角因子（不变）——可见天空比例
+- $e^{-k_c \cdot \text{LAD} \cdot l}$：Beer-Lambert 树冠透射因子
+- $\tau$：半透明遮阳材料短波透射率
+- $l$：特征树冠厚度 [m]，由 TreeCanopyMeshes 包围盒 Z 轴范围计算
+
+**守恒关系：** $SVF + TVF + TRVF + OVF_{\text{opaque}} = 1.0$（上半球）
+
+**注意：** $OVF_{\text{opaque}}$（不透光障碍物视角因子）为被不透光物体遮挡的剩余比例（此前包含所有障碍物类型）。
 
 其中：
 
@@ -458,6 +476,8 @@ $$I_{\text{transmitted}} = I_{\text{DN}} \cdot \exp(-k \cdot \text{LAD} \cdot s)
 ### 10.2 修正长波辐射
 
 $$L_{\downarrow}^{\text{actual}} = L_{\text{sky}} \cdot SVF + \varepsilon_{\text{sur}} \cdot \sigma \cdot T_{\text{sur,K}}^4 \cdot (1 - SVF)$$
+
+**注意：** 周围长波项使用 $(1 - SVF)$，包含所有非天空方向（不透光障碍物、树木和半透明材料）。这在物理上是正确的，因为所有非天空表面都对地面接收到的周围长波辐射有贡献。
 
 其中：
 

@@ -45,6 +45,10 @@ namespace ThermalComfort.Core
         /// </summary>
         /// <param name="dniExposureFactor">Effective DNI exposure factor [0-1], accounts for
         /// transmission through vegetation (Beer-Lambert) and translucent materials.</param>
+        /// <summary>
+        /// ENHANCED (2026-06-16): Precise diffuse radiation with decomposed view factors.
+        /// DHI_eff = SVF*DHI + TVF*DHI*exp(-k_c*LAD*l) + TRVF*DHI*tau
+        /// </summary>
         public static double CalculateMRT_SolarCal(
             double airTemp,
             double directNormalIrradiance,
@@ -54,12 +58,20 @@ namespace ThermalComfort.Core
             double skyViewFactor,
             double groundViewFactor,
             double obstacleViewFactor,
+            double treeViewFactor,
+            double translucentViewFactor,
             double dniExposureFactor,
             double solarAltitude,
-            MRTConfig config)
+            MRTConfig config,
+            ObstacleSet obstacleSet = null,
+            double obstacleTemp = double.NaN,
+            double treeCanopyTemp = double.NaN,
+            double translucentTemp = double.NaN)
         {
             double groundTemp = config.GroundTemperature ?? airTemp;
-            double obstacleTemp = config.SurroundingSurfaceTemperature ?? airTemp;
+            if (double.IsNaN(obstacleTemp)) obstacleTemp = airTemp;
+            if (double.IsNaN(treeCanopyTemp)) treeCanopyTemp = airTemp;
+            if (double.IsNaN(translucentTemp)) translucentTemp = airTemp;
             double refTemp = airTemp;
             const double stefanBoltzmann = 5.67e-8;
 
@@ -71,7 +83,23 @@ namespace ThermalComfort.Core
                 // ENHANCED (2026-06-14): dniExposureFactor accounts for transmission
                 // through vegetation (Beer-Lambert) and translucent materials
                 double directComponent = dniExposureFactor * projectionFactor * directNormalIrradiance;
-                double diffuseComponent = 0.5 * skyViewFactor * config.PostureFactor * diffuseHorizontalIrradiance;
+
+                // ENHANCED (2026-06-16): Decomposed diffuse radiation
+                // DHI_eff = SVF*DHI + TVF*DHI*exp(-k*LAD*l) + TRVF*DHI*tau
+                double canopyThickness = obstacleSet != null
+                    ? HumanExposureModel.CalculateCanopyCharacteristicThickness(obstacleSet.TreeCanopyMeshes)
+                    : 0.0;
+                double kcLAD = obstacleSet != null
+                    ? obstacleSet.ExtinctionCoefficient * obstacleSet.LeafAreaDensity : 0.0;
+                double treeTransmittance = Math.Exp(-kcLAD * canopyThickness);
+                double tau = obstacleSet != null ? obstacleSet.TranslucentTransmittance : 0.0;
+
+                double effectiveDiffuse = diffuseHorizontalIrradiance * (
+                    skyViewFactor
+                    + treeViewFactor * treeTransmittance
+                    + translucentViewFactor * tau);
+
+                double diffuseComponent = 0.5 * config.PostureFactor * effectiveDiffuse;
                 double reflectedComponent = 0.5 * groundViewFactor * config.PostureFactor
                     * config.FloorReflectance * globalHorizontalIrradiance;
 
@@ -91,11 +119,13 @@ namespace ThermalComfort.Core
 
                 double lwCoeff = config.LongwaveLinearCoeff > 0 ? config.LongwaveLinearCoeff : 0.5;
 
-                // THREE-COMPONENT longwave decomposition (physically correct)
+                // FIVE-COMPONENT longwave decomposition
                 deltaT_lw = lwCoeff * (
                     skyViewFactor * (skyTemp - refTemp) +
                     groundViewFactor * (groundTemp - refTemp) +
-                    obstacleViewFactor * (obstacleTemp - refTemp));
+                    obstacleViewFactor * (obstacleTemp - refTemp) +
+                    treeViewFactor * (treeCanopyTemp - refTemp) +
+                    translucentViewFactor * (translucentTemp - refTemp));
             }
 
             return airTemp + deltaT_sw + deltaT_lw;
@@ -126,6 +156,10 @@ namespace ThermalComfort.Core
         /// </summary>
         /// <param name="dniExposureFactor">Effective DNI exposure factor [0-1], accounts for
         /// transmission through vegetation (Beer-Lambert) and translucent materials.</param>
+        /// <summary>
+        /// ENHANCED (2026-06-16): Precise diffuse radiation with decomposed view factors.
+        /// DHI_eff = SVF*DHI + TVF*DHI*exp(-k_c*LAD*l) + TRVF*DHI*tau
+        /// </summary>
         public static double CalculateMRT_RayMan(
             double airTemp,
             double directNormalIrradiance,
@@ -135,9 +169,15 @@ namespace ThermalComfort.Core
             double skyViewFactor,
             double groundViewFactor,
             double obstacleViewFactor,
+            double treeViewFactor,
+            double translucentViewFactor,
             double dniExposureFactor,
             double solarAltitude,
-            MRTConfig config)
+            MRTConfig config,
+            ObstacleSet obstacleSet = null,
+            double obstacleTemp = double.NaN,
+            double treeCanopyTemp = double.NaN,
+            double translucentTemp = double.NaN)
         {
             const double stefanBoltzmann = 5.67e-8;
             double absorptivity = config.BodyAbsorptivity;
@@ -146,7 +186,12 @@ namespace ThermalComfort.Core
 
             // Temperatures in Kelvin
             double groundTempK = (config.GroundTemperature ?? airTemp) + 273.15;
-            double obstacleTempK = (config.SurroundingSurfaceTemperature ?? airTemp) + 273.15;
+            if (double.IsNaN(obstacleTemp)) obstacleTemp = airTemp;
+            if (double.IsNaN(treeCanopyTemp)) treeCanopyTemp = airTemp;
+            if (double.IsNaN(translucentTemp)) translucentTemp = airTemp;
+            double obstacleTempK = obstacleTemp + 273.15;
+            double treeCanopyTempK = treeCanopyTemp + 273.15;
+            double translucentTempK = translucentTemp + 273.15;
 
             double skyTempK = Math.Pow(horizontalInfrared / (skyEps * stefanBoltzmann), 0.25);
             double skyLongwave = emissivity * stefanBoltzmann * Math.Pow(skyTempK, 4);
@@ -155,12 +200,30 @@ namespace ThermalComfort.Core
             double groundLongwave = groundEps * stefanBoltzmann * Math.Pow(groundTempK, 4);
             double obstacleLongwave = obstacleEps * stefanBoltzmann * Math.Pow(obstacleTempK, 4);
 
-            // THREE-COMPONENT longwave decomposition (physically correct)
+            // ENHANCED (2026-06-16): Decompose effective diffuse irradiance
+            double canopyThickness = obstacleSet != null
+                ? HumanExposureModel.CalculateCanopyCharacteristicThickness(obstacleSet.TreeCanopyMeshes)
+                : 0.0;
+            double kcLAD = obstacleSet != null
+                ? obstacleSet.ExtinctionCoefficient * obstacleSet.LeafAreaDensity : 0.0;
+            double treeTransmittance = Math.Exp(-kcLAD * canopyThickness);
+            double tau = obstacleSet != null ? obstacleSet.TranslucentTransmittance : 0.0;
+
+            double effectiveDiffuse = diffuseHorizontalIrradiance * (
+                skyViewFactor
+                + treeViewFactor * treeTransmittance
+                + translucentViewFactor * tau);
+
+            // FIVE-COMPONENT longwave decomposition
+            double treeLongwave = obstacleEps * stefanBoltzmann * Math.Pow(treeCanopyTempK, 4);
+            double translucentLongwave = obstacleEps * stefanBoltzmann * Math.Pow(translucentTempK, 4);
             double mrtK4 = (1.0 / stefanBoltzmann) * (
-                (skyLongwave + absorptivity * diffuseHorizontalIrradiance / emissivity) * skyViewFactor +
+                (skyLongwave + absorptivity * effectiveDiffuse / emissivity) * skyViewFactor +
                 (groundLongwave + absorptivity * globalHorizontalIrradiance * config.FloorReflectance / emissivity)
                     * groundViewFactor +
-                obstacleLongwave * obstacleViewFactor);
+                obstacleLongwave * obstacleViewFactor +
+                treeLongwave * treeViewFactor +
+                translucentLongwave * translucentViewFactor);
 
             if (directNormalIrradiance > 0 && dniExposureFactor > 0)
             {
@@ -193,6 +256,13 @@ namespace ThermalComfort.Core
         /// <param name="dniExposureFactor">Effective DNI exposure factor [0-1]. In legacy mode
         /// (no ObstacleSet), this equals exposureFactor. With ObstacleSet, it accounts for
         /// partial transmission through trees and translucent sunshades.</param>
+        /// <summary>
+        /// Unified MRT calculation entry point.
+        ///
+        /// ENHANCED (2026-06-16): Added treeViewFactor and translucentViewFactor for
+        /// precise diffuse radiation calculation with decomposed view factors.
+        /// DHI_eff = SVF*DHI + TVF*DHI*exp(-k_c*LAD*l) + TRVF*DHI*tau
+        /// </summary>
         public static double CalculateMRT(
             double airTemp,
             double directNormalIrradiance,
@@ -202,10 +272,16 @@ namespace ThermalComfort.Core
             double skyViewFactor,
             double groundViewFactor,
             double obstacleViewFactor,
+            double treeViewFactor,
+            double translucentViewFactor,
             double dniExposureFactor,
             double solarAltitude,
             MRTConfig config,
-            bool useRayMan = false)
+            bool useRayMan = false,
+            ObstacleSet obstacleSet = null,
+            double obstacleTemp = double.NaN,
+            double treeCanopyTemp = double.NaN,
+            double translucentTemp = double.NaN)
         {
             if (useRayMan)
             {
@@ -213,7 +289,9 @@ namespace ThermalComfort.Core
                     airTemp, directNormalIrradiance, diffuseHorizontalIrradiance,
                     globalHorizontalIrradiance, horizontalInfrared,
                     skyViewFactor, groundViewFactor, obstacleViewFactor,
-                    dniExposureFactor, solarAltitude, config);
+                    treeViewFactor, translucentViewFactor,
+                    dniExposureFactor, solarAltitude, config, obstacleSet,
+                    obstacleTemp, treeCanopyTemp, translucentTemp);
             }
             else
             {
@@ -221,7 +299,9 @@ namespace ThermalComfort.Core
                     airTemp, directNormalIrradiance, diffuseHorizontalIrradiance,
                     globalHorizontalIrradiance, horizontalInfrared,
                     skyViewFactor, groundViewFactor, obstacleViewFactor,
-                    dniExposureFactor, solarAltitude, config);
+                    treeViewFactor, translucentViewFactor,
+                    dniExposureFactor, solarAltitude, config, obstacleSet,
+                    obstacleTemp, treeCanopyTemp, translucentTemp);
             }
         }
 

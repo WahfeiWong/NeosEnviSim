@@ -388,12 +388,14 @@ namespace SolarPV
             AddRuntimeMessage(GH_RuntimeMessageLevel.Remark, "Calculating Sky View Factors...");
             // ENHANCED (2026-06-15): SVF uses Opaque + TreeDetail + TranslucentShade only.
             // TreeCanopy is excluded — it exists only for Beer-Lambert path-length in DNI.
-            CalculateSVF(allFaceData, svfObstacleMeshes, pvMeshes, rayConfig.SVFSampleCount, rayConfig.SVFRayOffset);
+            // ENHANCED (2026-06-16): Pass full ObstacleSet for decomposed view factor calculation.
+            // SVF, TVF, TRVF, and OVF_opaque are computed separately.
+            CalculateSVF(allFaceData, obstacleSet, pvMeshes, rayConfig.SVFSampleCount, rayConfig.SVFRayOffset);
 
             if (pvConfig.EnableBifacial)
             {
                 AddRuntimeMessage(GH_RuntimeMessageLevel.Remark, "Calculating rear-side Sky View Factors...");
-                CalculateRearSVF(allFaceData, svfObstacleMeshes, pvMeshes, rayConfig.SVFSampleCount, rayConfig.SVFRayOffset);
+                CalculateRearSVF(allFaceData, obstacleSet, pvMeshes, rayConfig.SVFSampleCount, rayConfig.SVFRayOffset);
             }
 
             int numHours = endHoy - startHoy + 1;
@@ -619,7 +621,20 @@ namespace SolarPV
                             directEffective = record.DirectNormalRadiation * cosTheta * iam * dniTransmissionFactor;
                         }
 
+                        // ENHANCED (2026-06-16): Precise diffuse radiation with decomposed view factors.
+                        // DHI_eff = SVF*DHI_base + TVF*DHI_base*exp(-k*LAD*l) + TRVF*DHI_base*tau
+                        // where DHI_base = isotropicDiffuse or perezDiffuse (full-hemisphere value).
                         double diffuseEffective;
+
+                        // Precompute tree canopy Beer-Lambert transmission and canopy thickness
+                        double canopyThickness = obstacleSet != null
+                            ? HumanExposureModel.CalculateCanopyCharacteristicThickness(obstacleSet.TreeCanopyMeshes)
+                            : 0.0;
+                        double kcLAD = obstacleSet != null
+                            ? obstacleSet.ExtinctionCoefficient * obstacleSet.LeafAreaDensity : 0.0;
+                        double treeTransmittance = Math.Exp(-kcLAD * canopyThickness);
+                        double tau = obstacleSet != null ? obstacleSet.TranslucentTransmittance : 0.0;
+
                         if (skyConfig.UsePerezModel && record.DiffuseHorizontalRadiation > 0)
                         {
                             double perezDiffuse = PerezSkyModel.CalculateDiffuseTilted(
@@ -636,20 +651,29 @@ namespace SolarPV
                             // Threshold 0.3 is empirically chosen for typical urban canyons.
                             if (fd.SVF < 0.3)
                             {
-                                diffuseEffective = SolarGeometry.IsotropicDiffuseIrradiance(
-                                    record.DiffuseHorizontalRadiation, fd.TiltAngle) * fd.SVF;
+                                double isoDiffuse = SolarGeometry.IsotropicDiffuseIrradiance(
+                                    record.DiffuseHorizontalRadiation, fd.TiltAngle);
+                                // Decomposed diffuse: sky + tree canopy + translucent
+                                diffuseEffective = isoDiffuse * fd.SVF
+                                                 + isoDiffuse * fd.TVF * treeTransmittance
+                                                 + isoDiffuse * fd.TRVF * tau;
                             }
                             else
                             {
-                                // Perez assumes full sky dome visibility; scale by SVF to
-                                // account for obstacle occlusion of the anisotropic sky.
-                                diffuseEffective = perezDiffuse * fd.SVF;
+                                // Perez full-hemisphere diffuse scaled by decomposed view factors
+                                diffuseEffective = perezDiffuse * fd.SVF
+                                                 + perezDiffuse * fd.TVF * treeTransmittance
+                                                 + perezDiffuse * fd.TRVF * tau;
                             }
                         }
                         else
                         {
-                            diffuseEffective = SolarGeometry.IsotropicDiffuseIrradiance(
-                                record.DiffuseHorizontalRadiation, fd.TiltAngle) * fd.SVF;
+                            double isoDiffuse = SolarGeometry.IsotropicDiffuseIrradiance(
+                                record.DiffuseHorizontalRadiation, fd.TiltAngle);
+                            // Decomposed diffuse: sky + tree canopy + translucent
+                            diffuseEffective = isoDiffuse * fd.SVF
+                                             + isoDiffuse * fd.TVF * treeTransmittance
+                                             + isoDiffuse * fd.TRVF * tau;
                         }
 
                         double groundReflected = SolarGeometry.GroundReflectedIrradiance(
@@ -899,6 +923,10 @@ namespace SolarPV
             }
         }
 
+        /// <summary>
+        /// ENHANCED (2026-06-16): Populate ViewResult with decomposed view factors.
+        /// Now includes TVF (Tree View Factor) and TRVF (Translucent View Factor).
+        /// </summary>
         private void PopulateViewResult(ViewResult view, List<List<FaceData>> allFaceData)
         {
             view.PanelCount = allFaceData.Count;
@@ -909,17 +937,29 @@ namespace SolarPV
                 var rearSvfList = new List<double>();
                 var obsFront = new List<double>();
                 var obsRear = new List<double>();
+                var tvfFront = new List<double>();
+                var tvfRear = new List<double>();
+                var trvfFront = new List<double>();
+                var trvfRear = new List<double>();
                 foreach (var fd in panel)
                 {
                     svfList.Add(fd.SVF);
                     rearSvfList.Add(fd.RearSVF);
                     obsFront.Add(fd.FrontObstacleViewFactor);
                     obsRear.Add(fd.RearObstacleViewFactor);
+                    tvfFront.Add(fd.TVF);
+                    tvfRear.Add(fd.RearTVF);
+                    trvfFront.Add(fd.TRVF);
+                    trvfRear.Add(fd.RearTRVF);
                 }
                 view.FrontSVF.Add(svfList);
                 view.RearSVF.Add(rearSvfList);
                 view.FrontObstacleViewFactor.Add(obsFront);
                 view.RearObstacleViewFactor.Add(obsRear);
+                view.FrontTVF.Add(tvfFront);
+                view.RearTVF.Add(tvfRear);
+                view.FrontTRVF.Add(trvfFront);
+                view.RearTRVF.Add(trvfRear);
             }
         }
 
@@ -1079,24 +1119,31 @@ namespace SolarPV
             return false;
         }
 
-        private void CalculateSVF(List<List<FaceData>> allFaceData, List<Mesh> obstacles,
+        /// <summary>
+        /// ENHANCED (2026-06-16): Calculate decomposed view factors for front side.
+        /// Computes four mutually exclusive components:
+        ///   - SVF: visible sky (no obstruction)
+        ///   - OVF_opaque: blocked by opaque objects only
+        ///   - TVF: blocked by tree detail meshes
+        ///   - TRVF: blocked by translucent shade meshes
+        /// Priority for overlapping obstacles: Opaque &gt; TreeDetail &gt; TranslucentShade.
+        /// Conservation: SVF + OVF_opaque + TVF + TRVF = 1.0
+        /// </summary>
+        private void CalculateSVF(List<List<FaceData>> allFaceData, ObstacleSet obstacleSet,
             List<Mesh> pvMeshes, int sampleCount, double rayOffset)
         {
-            Mesh combinedObstacles = new Mesh();
-            if (obstacles != null)
-            {
-                foreach (var obs in obstacles)
-                    if (obs != null) combinedObstacles.Append(obs);
-            }
-
             List<Vector3d> skyDirections = SolarGeometry.GenerateHemisphereDirections(sampleCount);
             int totalSkyDirs = skyDirections.Count;
 
-            bool hasObstacles = combinedObstacles.Faces.Count > 0;
+            bool hasOpaque = obstacleSet?.OpaqueObjectMeshes != null && obstacleSet.OpaqueObjectMeshes.Count > 0;
+            bool hasTreeDetail = obstacleSet?.TreeDetailMeshes != null && obstacleSet.TreeDetailMeshes.Count > 0;
+            bool hasTranslucent = obstacleSet?.TranslucentShadeMeshes != null && obstacleSet.TranslucentShadeMeshes.Count > 0;
             bool hasOtherPanels = pvMeshes != null && pvMeshes.Count > 0;
 
-            // Fast path: no obstacles at all (neither explicit nor other detector surfaces)
-            if (!hasObstacles && !hasOtherPanels)
+            bool hasAnyObstacle = hasOpaque || hasTreeDetail || hasTranslucent || hasOtherPanels;
+
+            // Fast path: no obstacles at all
+            if (!hasAnyObstacle)
             {
                 foreach (var panel in allFaceData)
                 {
@@ -1109,6 +1156,8 @@ namespace SolarPV
                         }
                         fd.SVF = totalSkyDirs > 0 ? (double)relevantDirs / totalSkyDirs : 1.0;
                         fd.FrontObstacleViewFactor = 0.0;
+                        fd.TVF = 0.0;
+                        fd.TRVF = 0.0;
                     }
                 }
                 return;
@@ -1122,7 +1171,7 @@ namespace SolarPV
                     for (int f = 0; f < faceList.Count; f++)
                     {
                         var fd = faceList[f];
-                        int visibleRays = 0;
+                        int skyRays = 0, opaqueRays = 0, treeRays = 0, translucentRays = 0;
                         int totalRays = 0;
 
                         Point3d rayOrigin = fd.Center + fd.Normal * rayOffset;
@@ -1133,41 +1182,93 @@ namespace SolarPV
                             totalRays++;
 
                             Ray3d ray = new Ray3d(rayOrigin, dir);
-                            bool isBlocked = false;
+                            bool classified = false;
 
-                            // Check explicit obstacles
-                            if (hasObstacles)
+                            // STEP 1: Check opaque objects (highest priority)
+                            if (!classified && hasOpaque)
                             {
-                                double t = Intersection.MeshRay(combinedObstacles, ray);
-                                if (t > 0 && t <= 500)
+                                foreach (var mesh in obstacleSet.OpaqueObjectMeshes)
                                 {
-                                    isBlocked = true;
-                                }
-                            }
-
-                            // Check other detector surfaces as obstacles, excluding self
-                            if (!isBlocked && hasOtherPanels)
-                            {
-                                for (int m = 0; m < pvMeshes.Count; m++)
-                                {
-                                    if (m == p) continue; // Skip self (same panel index)
-                                    var mesh = pvMeshes[m];
                                     if (mesh == null || mesh.Faces.Count == 0) continue;
                                     double t = Intersection.MeshRay(mesh, ray);
-                                    if (t > 0 && t <= 500)
+                                    if (t > 0.001 && t <= 500)
                                     {
-                                        isBlocked = true;
+                                        opaqueRays++;
+                                        classified = true;
                                         break;
                                     }
                                 }
                             }
 
-                            if (!isBlocked)
-                                visibleRays++;
+                            // STEP 2: Check tree detail meshes
+                            if (!classified && hasTreeDetail)
+                            {
+                                foreach (var mesh in obstacleSet.TreeDetailMeshes)
+                                {
+                                    if (mesh == null || mesh.Faces.Count == 0) continue;
+                                    double t = Intersection.MeshRay(mesh, ray);
+                                    if (t > 0.001 && t <= 500)
+                                    {
+                                        treeRays++;
+                                        classified = true;
+                                        break;
+                                    }
+                                }
+                            }
+
+                            // STEP 3: Check translucent shade meshes
+                            if (!classified && hasTranslucent)
+                            {
+                                foreach (var mesh in obstacleSet.TranslucentShadeMeshes)
+                                {
+                                    if (mesh == null || mesh.Faces.Count == 0) continue;
+                                    double t = Intersection.MeshRay(mesh, ray);
+                                    if (t > 0.001 && t <= 500)
+                                    {
+                                        translucentRays++;
+                                        classified = true;
+                                        break;
+                                    }
+                                }
+                            }
+
+                            // STEP 4: Check other PV panels as obstacles
+                            if (!classified && hasOtherPanels)
+                            {
+                                for (int m = 0; m < pvMeshes.Count; m++)
+                                {
+                                    if (m == p) continue;
+                                    var mesh = pvMeshes[m];
+                                    if (mesh == null || mesh.Faces.Count == 0) continue;
+                                    double t = Intersection.MeshRay(mesh, ray);
+                                    if (t > 0.001 && t <= 500)
+                                    {
+                                        opaqueRays++; // PV panels count as opaque
+                                        classified = true;
+                                        break;
+                                    }
+                                }
+                            }
+
+                            // STEP 5: Unoccluded → sky
+                            if (!classified)
+                                skyRays++;
                         }
 
-                        fd.SVF = totalRays > 0 ? (double)visibleRays / totalRays : 1.0;
-                        fd.FrontObstacleViewFactor = totalRays > 0 ? (double)(totalRays - visibleRays) / totalRays : 0.0;
+                        if (totalRays > 0)
+                        {
+                            fd.SVF = (double)skyRays / totalRays;
+                            fd.FrontObstacleViewFactor = (double)opaqueRays / totalRays;
+                            fd.TVF = (double)treeRays / totalRays;
+                            fd.TRVF = (double)translucentRays / totalRays;
+                        }
+                        else
+                        {
+                            fd.SVF = 1.0;
+                            fd.FrontObstacleViewFactor = 0.0;
+                            fd.TVF = 0.0;
+                            fd.TRVF = 0.0;
+                        }
                     }
                 }
                 catch
@@ -1177,28 +1278,36 @@ namespace SolarPV
                     {
                         faceList[f].SVF = 0.0;
                         faceList[f].FrontObstacleViewFactor = 1.0;
+                        faceList[f].TVF = 0.0;
+                        faceList[f].TRVF = 0.0;
                     }
                 }
             });
         }
 
-        private void CalculateRearSVF(List<List<FaceData>> allFaceData, List<Mesh> obstacles,
+        /// <summary>
+        /// ENHANCED (2026-06-16): Calculate decomposed view factors for rear side (bifacial).
+        /// Computes four mutually exclusive components (rear-facing hemisphere):
+        ///   - RearSVF: visible sky from rear side
+        ///   - RearObstacleViewFactor: blocked by opaque objects only
+        ///   - RearTVF: blocked by tree detail meshes
+        ///   - RearTRVF: blocked by translucent shade meshes
+        /// Priority: Opaque &gt; TreeDetail &gt; TranslucentShade.
+        /// </summary>
+        private void CalculateRearSVF(List<List<FaceData>> allFaceData, ObstacleSet obstacleSet,
             List<Mesh> pvMeshes, int sampleCount, double rayOffset)
         {
-            Mesh combinedObstacles = new Mesh();
-            if (obstacles != null)
-            {
-                foreach (var obs in obstacles)
-                    if (obs != null) combinedObstacles.Append(obs);
-            }
-
             List<Vector3d> skyDirections = SolarGeometry.GenerateHemisphereDirections(sampleCount);
 
-            bool hasObstacles = combinedObstacles.Faces.Count > 0;
+            bool hasOpaque = obstacleSet?.OpaqueObjectMeshes != null && obstacleSet.OpaqueObjectMeshes.Count > 0;
+            bool hasTreeDetail = obstacleSet?.TreeDetailMeshes != null && obstacleSet.TreeDetailMeshes.Count > 0;
+            bool hasTranslucent = obstacleSet?.TranslucentShadeMeshes != null && obstacleSet.TranslucentShadeMeshes.Count > 0;
             bool hasOtherPanels = pvMeshes != null && pvMeshes.Count > 0;
 
-            // Fast path: no obstacles at all (neither explicit nor other detector surfaces)
-            if (!hasObstacles && !hasOtherPanels)
+            bool hasAnyObstacle = hasOpaque || hasTreeDetail || hasTranslucent || hasOtherPanels;
+
+            // Fast path: no obstacles at all
+            if (!hasAnyObstacle)
             {
                 foreach (var panel in allFaceData)
                 {
@@ -1207,6 +1316,8 @@ namespace SolarPV
                         double vfSkyRear = (1.0 - Math.Cos(fd.TiltAngle)) / 2.0;
                         fd.RearSVF = vfSkyRear;
                         fd.RearObstacleViewFactor = 0.0;
+                        fd.RearTVF = 0.0;
+                        fd.RearTRVF = 0.0;
                     }
                 }
                 return;
@@ -1223,7 +1334,7 @@ namespace SolarPV
                         Vector3d rearNormal = -fd.Normal;
                         rearNormal.Unitize();
 
-                        int visibleRays = 0;
+                        int skyRays = 0, opaqueRays = 0, treeRays = 0, translucentRays = 0;
                         int totalRays = 0;
 
                         Point3d rayOrigin = fd.Center + rearNormal * rayOffset;
@@ -1234,41 +1345,93 @@ namespace SolarPV
                             totalRays++;
 
                             Ray3d ray = new Ray3d(rayOrigin, dir);
-                            bool isBlocked = false;
+                            bool classified = false;
 
-                            // Check explicit obstacles
-                            if (hasObstacles)
+                            // STEP 1: Check opaque objects (highest priority)
+                            if (!classified && hasOpaque)
                             {
-                                double t = Intersection.MeshRay(combinedObstacles, ray);
-                                if (t > 0 && t <= 500)
+                                foreach (var mesh in obstacleSet.OpaqueObjectMeshes)
                                 {
-                                    isBlocked = true;
-                                }
-                            }
-
-                            // Check other detector surfaces as obstacles, excluding self
-                            if (!isBlocked && hasOtherPanels)
-                            {
-                                for (int m = 0; m < pvMeshes.Count; m++)
-                                {
-                                    if (m == p) continue; // Skip self (same panel index)
-                                    var mesh = pvMeshes[m];
                                     if (mesh == null || mesh.Faces.Count == 0) continue;
                                     double t = Intersection.MeshRay(mesh, ray);
-                                    if (t > 0 && t <= 500)
+                                    if (t > 0.001 && t <= 500)
                                     {
-                                        isBlocked = true;
+                                        opaqueRays++;
+                                        classified = true;
                                         break;
                                     }
                                 }
                             }
 
-                            if (!isBlocked)
-                                visibleRays++;
+                            // STEP 2: Check tree detail meshes
+                            if (!classified && hasTreeDetail)
+                            {
+                                foreach (var mesh in obstacleSet.TreeDetailMeshes)
+                                {
+                                    if (mesh == null || mesh.Faces.Count == 0) continue;
+                                    double t = Intersection.MeshRay(mesh, ray);
+                                    if (t > 0.001 && t <= 500)
+                                    {
+                                        treeRays++;
+                                        classified = true;
+                                        break;
+                                    }
+                                }
+                            }
+
+                            // STEP 3: Check translucent shade meshes
+                            if (!classified && hasTranslucent)
+                            {
+                                foreach (var mesh in obstacleSet.TranslucentShadeMeshes)
+                                {
+                                    if (mesh == null || mesh.Faces.Count == 0) continue;
+                                    double t = Intersection.MeshRay(mesh, ray);
+                                    if (t > 0.001 && t <= 500)
+                                    {
+                                        translucentRays++;
+                                        classified = true;
+                                        break;
+                                    }
+                                }
+                            }
+
+                            // STEP 4: Check other PV panels as obstacles
+                            if (!classified && hasOtherPanels)
+                            {
+                                for (int m = 0; m < pvMeshes.Count; m++)
+                                {
+                                    if (m == p) continue;
+                                    var mesh = pvMeshes[m];
+                                    if (mesh == null || mesh.Faces.Count == 0) continue;
+                                    double t = Intersection.MeshRay(mesh, ray);
+                                    if (t > 0.001 && t <= 500)
+                                    {
+                                        opaqueRays++;
+                                        classified = true;
+                                        break;
+                                    }
+                                }
+                            }
+
+                            // STEP 5: Unoccluded → sky
+                            if (!classified)
+                                skyRays++;
                         }
 
-                        fd.RearSVF = totalRays > 0 ? (double)visibleRays / totalRays : 0.0;
-                        fd.RearObstacleViewFactor = totalRays > 0 ? (double)(totalRays - visibleRays) / totalRays : 0.0;
+                        if (totalRays > 0)
+                        {
+                            fd.RearSVF = (double)skyRays / totalRays;
+                            fd.RearObstacleViewFactor = (double)opaqueRays / totalRays;
+                            fd.RearTVF = (double)treeRays / totalRays;
+                            fd.RearTRVF = (double)translucentRays / totalRays;
+                        }
+                        else
+                        {
+                            fd.RearSVF = 1.0;
+                            fd.RearObstacleViewFactor = 0.0;
+                            fd.RearTVF = 0.0;
+                            fd.RearTRVF = 0.0;
+                        }
                     }
                 }
                 catch
@@ -1278,11 +1441,18 @@ namespace SolarPV
                     {
                         faceList[f].RearSVF = 0.0;
                         faceList[f].RearObstacleViewFactor = 1.0;
+                        faceList[f].RearTVF = 0.0;
+                        faceList[f].RearTRVF = 0.0;
                     }
                 }
             });
         }
 
+        /// <summary>
+        /// Internal face data structure storing geometric and radiative properties.
+        /// ENHANCED (2026-06-16): Added TVF, TRVF for decomposed view factor diffuse radiation.
+        /// Conservation: SVF + FrontObstacleViewFactor + TVF + TRVF = 1.0 (upper hemisphere)
+        /// </summary>
         private class FaceData
         {
             public Point3d Center;
@@ -1291,8 +1461,18 @@ namespace SolarPV
             public double TiltAngle;
             public double SVF;
             public double RearSVF;
+            /// <summary>ENHANCED 2026-06-16: Now OPAQUE-ONLY (previously all obstacles).</summary>
             public double FrontObstacleViewFactor;
+            /// <summary>ENHANCED 2026-06-16: Now OPAQUE-ONLY (previously all obstacles).</summary>
             public double RearObstacleViewFactor;
+            /// <summary>NEW 2026-06-16: Tree View Factor - directions blocked by tree detail meshes.</summary>
+            public double TVF;
+            /// <summary>NEW 2026-06-16: Rear Tree View Factor.</summary>
+            public double RearTVF;
+            /// <summary>NEW 2026-06-16: Translucent View Factor - directions blocked by translucent shade meshes.</summary>
+            public double TRVF;
+            /// <summary>NEW 2026-06-16: Rear Translucent View Factor.</summary>
+            public double RearTRVF;
             public double TotalEnergy;
             public double TotalRearEnergy;
             public List<double> HourlyEnergy = new List<double>();

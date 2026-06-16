@@ -2,6 +2,16 @@
 
 This module calculates the Mean Radiant Temperature (MRT) for the human body in outdoor environments. It is based on backward ray-tracing building/vegetation occlusion analysis, supports both the SolarCal (ASHRAE 55) and RayMan calculation models, and employs full 4π spherical view factor decomposition to achieve physically correct longwave radiation computation.
 
+**Enhanced (2026-06-16):** 
+1. Decomposed view factors (TVF/TRVF) for precise diffuse radiation calculation. OVF is now OPAQUE-ONLY.
+2. Longwave radiation decomposition expanded from 3 to 5 components (sky, ground, opaque obstacle, tree canopy, translucent shade), each with independent surface temperatures via ObsSet component.
+3. Tsur input removed from MRT component; all surface temperatures (T_opaque, T_canopy, T_translucent) moved to ObsSet component.
+4. MRT outputs reorganized into 4 categories: MRT-related (9), view factors (5), exposure (2), other (1) = 17 total.
+
+**Enhanced (2026-06-16):** Decomposed view factors for precise diffuse radiation calculation. The OVF (Obstacle View Factor) is now **OPAQUE-ONLY**, with TVF (Tree View Factor) and TRVF (Translucent View Factor) added as separate components. The effective diffuse irradiance formula now accounts for partial transmission through tree canopies (Beer-Lambert law) and translucent materials:
+
+$$I_{\text{DH,eff}} = I_{\text{DH}} \cdot \left( F_{\text{SVF}} + F_{\text{TVF}} \cdot e^{-k_c \cdot \text{LAD} \cdot l} + F_{\text{TRVF}} \cdot \tau \right)$$
+
 **Enhanced (2026-06-15):** Corrected DNI physics — when a ray intersects multiple non-opaque obstacle types, the DNI contribution is the **product** of individual contributions from each (or multiple same-type) obstacle, rather than considering only the nearest occlusion from the sun direction. Added `CalculateRayDNITransmission` core method, replacing the legacy `ClassifyRayHit` single-obstacle classification logic. ObsSet input is **no longer backward-compatible**, only accepts ObstacleSet encapsulated data.
 
 **Enhanced (2026-06-14):** Introduces fine-grained Direct Normal Irradiance (DNI) exposure factor calculation, supporting differentiated transmission through three obstacle types: opaque objects (full block), trees (Beer-Lambert canopy transmission), and translucent sunshades (fixed transmittance). A classified Obstacle Set (ObstacleSet) replaces the original flat Brep list input to achieve more accurate direct radiation calculation.
@@ -18,7 +28,7 @@ Based on the SolarCal model from ASHRAE Standard 55, combining shortwave solar r
 
 The solar radiation flux received by the human body consists of direct radiation, diffuse radiation, and ground-reflected radiation:
 
-$$I_{\text{body}} = f_{\text{DNI}} \cdot f_p(\gamma) \cdot I_{\text{DN}} + \frac{1}{2} f \cdot F_{\text{SVF}} \cdot I_{\text{DH}} + \frac{1}{2} f \cdot F_{\text{GVF}} \cdot \rho_g \cdot I_{\text{GH}}$$
+$$I_{\text{body}} = f_{\text{DNI}} \cdot f_p(\gamma) \cdot I_{\text{DN}} + \frac{1}{2} f \cdot I_{\text{DH,eff}} + \frac{1}{2} f \cdot F_{\text{GVF}} \cdot \rho_g \cdot I_{\text{GH}}$$
 
 Where:
 - $f_{\text{DNI}}$: **Effective DNI exposure factor** (0–1), combining exposure and transmission effects (see Section 2.1 enhanced description)
@@ -41,7 +51,7 @@ Where $\alpha$ is the human body shortwave absorptivity, $\varepsilon$ is the hu
 
 **Three-Directional Longwave Radiation Decomposition:**
 
-$$\Delta T_{\text{lw}} = c_{\text{lw}} \cdot \left[ F_{\text{SVF}} \cdot (T_{\text{sky}} - T_{\text{ref}}) + F_{\text{GVF}} \cdot (T_g - T_{\text{ref}}) + F_{\text{OVF}} \cdot (T_{\text{obs}} - T_{\text{ref}}) \right]$$
+$$\Delta T_{\text{lw}} = c_{\text{lw}} \cdot \left[ F_{\text{SVF}} \cdot (T_{\text{sky}} - T_{\text{ref}}) + F_{\text{GVF}} \cdot (T_g - T_{\text{ref}}) + F_{\text{OVF,opaque}} \cdot (T_{\text{obs}} - T_{\text{ref}}) + F_{\text{TVF}} \cdot (T_{\text{canopy}} - T_{\text{ref}}) + F_{\text{TRVF}} \cdot (T_{\text{translucent}} - T_{\text{ref}}) \right]$$
 
 Where:
 - $c_{\text{lw}}$: Longwave linearization coefficient (default 0.5)
@@ -51,9 +61,25 @@ Where:
 - $T_{\text{ref}}$: Reference temperature (equal to air temperature) [°C]
 - $F_{\text{OVF}}$: Obstacle view factor
 
-View factor conservation:
+**ENHANCED (2026-06-16) — Five-Component View Factor Decomposition:**
 
-$$F_{\text{SVF}} + F_{\text{GVF}} + F_{\text{OVF}} = 1.0$$
+The full-sphere (4π) view factors are now decomposed into five mutually exclusive components:
+
+| Component | Symbol | Description |
+|:---:|:---:|:---|
+| Sky View Factor | $F_{\text{SVF}}$ | Visible sky (Z > 0, no obstruction) |
+| Ground View Factor | $F_{\text{GVF}}$ | Visible ground (Z < 0, no obstruction) |
+| Opaque Obstacle View Factor | $F_{\text{OVF,opaque}}$ | Blocked by opaque objects only |
+| Tree View Factor | $F_{\text{TVF}}$ | Blocked by tree detail meshes |
+| Translucent View Factor | $F_{\text{TRVF}}$ | Blocked by translucent shade meshes |
+
+**Conservation:**
+
+$$F_{\text{SVF}} + F_{\text{GVF}} + F_{\text{OVF,opaque}} + F_{\text{TVF}} + F_{\text{TRVF}} = 1.0$$
+
+**Overlap Resolution Priority:** Opaque > TreeDetail > TranslucentShade. When a direction is blocked by multiple obstacle types, it is assigned to the highest-priority category.
+
+> **Note:** The OVF is now **OPAQUE-ONLY** (previously included all obstacle types). TVF and TRVF represent the fractions of the full sphere blocked by tree detail meshes and translucent shade meshes, respectively.
 
 **Final MRT:**
 

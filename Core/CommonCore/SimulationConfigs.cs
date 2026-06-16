@@ -483,13 +483,24 @@ namespace Common.Core
     [Serializable]
     public class ObstacleSet
     {
+        // ---- Tree-related parameters ----
         public List<Rhino.Geometry.Mesh> TreeDetailMeshes { get; set; } = new List<Rhino.Geometry.Mesh>();
         public List<Rhino.Geometry.Mesh> TreeCanopyMeshes { get; set; } = new List<Rhino.Geometry.Mesh>();
         public double LeafAreaDensity { get; set; } = 1.0;
         public double ExtinctionCoefficient { get; set; } = 0.65;
+        public double TreeCanopyTemperature { get; set; } = double.NaN;
+        public List<double> HourlyTreeCanopyTemperatures { get; set; } = null;
+
+        // ---- Translucent shade parameters ----
         public List<Rhino.Geometry.Mesh> TranslucentShadeMeshes { get; set; } = new List<Rhino.Geometry.Mesh>();
         public double TranslucentTransmittance { get; set; } = 0.05;
+        public double TranslucentSurfaceTemperature { get; set; } = double.NaN;
+        public List<double> HourlyTranslucentSurfaceTemperatures { get; set; } = null;
+
+        // ---- Opaque obstacle parameters ----
         public List<Rhino.Geometry.Mesh> OpaqueObjectMeshes { get; set; } = new List<Rhino.Geometry.Mesh>();
+        public double SurroundingSurfaceTemperature { get; set; } = double.NaN;
+        public List<double> HourlySurroundingSurfaceTemperatures { get; set; } = null;
 
         public bool HasAnyObstacles =>
             (TreeDetailMeshes?.Count > 0) || (TreeCanopyMeshes?.Count > 0) ||
@@ -503,6 +514,33 @@ namespace Common.Core
             if (TranslucentShadeMeshes != null) all.AddRange(TranslucentShadeMeshes);
             if (OpaqueObjectMeshes != null) all.AddRange(OpaqueObjectMeshes);
             return all;
+        }
+
+        /// <summary>Get obstacle surface temperature for the given hour. Falls back to airTemp if not set.</summary>
+        public double GetObstacleTemperature(int hoy, double airTemp)
+        {
+            if (HourlySurroundingSurfaceTemperatures != null && hoy >= 0 && hoy < HourlySurroundingSurfaceTemperatures.Count)
+                return HourlySurroundingSurfaceTemperatures[hoy];
+            if (!double.IsNaN(SurroundingSurfaceTemperature)) return SurroundingSurfaceTemperature;
+            return airTemp;
+        }
+
+        /// <summary>Get tree canopy temperature for the given hour. Falls back to airTemp if not set.</summary>
+        public double GetTreeCanopyTemperature(int hoy, double airTemp)
+        {
+            if (HourlyTreeCanopyTemperatures != null && hoy >= 0 && hoy < HourlyTreeCanopyTemperatures.Count)
+                return HourlyTreeCanopyTemperatures[hoy];
+            if (!double.IsNaN(TreeCanopyTemperature)) return TreeCanopyTemperature;
+            return airTemp;
+        }
+
+        /// <summary>Get translucent surface temperature for the given hour. Falls back to airTemp if not set.</summary>
+        public double GetTranslucentSurfaceTemperature(int hoy, double airTemp)
+        {
+            if (HourlyTranslucentSurfaceTemperatures != null && hoy >= 0 && hoy < HourlyTranslucentSurfaceTemperatures.Count)
+                return HourlyTranslucentSurfaceTemperatures[hoy];
+            if (!double.IsNaN(TranslucentSurfaceTemperature)) return TranslucentSurfaceTemperature;
+            return airTemp;
         }
     }
 
@@ -521,7 +559,6 @@ namespace Common.Core
         public bool IncludeLongwave { get; set; } = true;
         public double MaxRayDistance { get; set; } = 500.0;
         public double? GroundTemperature { get; set; } = null;
-        public double? SurroundingSurfaceTemperature { get; set; } = null;
         public bool UseRayManModel { get; set; } = false;
         public int SVFSampleCount { get; set; } = 1000;
         public double SkyEmissivity { get; set; } = -1.0;

@@ -77,6 +77,11 @@ namespace SolarPV.Core
                 else if (line == "[RearSVF]") { idx++; result.RearSVF = ReadDoublePanels(ref idx, lines); }
                 else if (line == "[FrontObstacleViewFactor]") { idx++; result.FrontObstacleViewFactor = ReadDoublePanels(ref idx, lines); }
                 else if (line == "[RearObstacleViewFactor]") { idx++; result.RearObstacleViewFactor = ReadDoublePanels(ref idx, lines); }
+                // ENHANCED (2026-06-16): Parse TVF and TRVF
+                else if (line == "[FrontTVF]") { idx++; result.FrontTVF = ReadDoublePanels(ref idx, lines); }
+                else if (line == "[RearTVF]") { idx++; result.RearTVF = ReadDoublePanels(ref idx, lines); }
+                else if (line == "[FrontTRVF]") { idx++; result.FrontTRVF = ReadDoublePanels(ref idx, lines); }
+                else if (line == "[RearTRVF]") { idx++; result.RearTRVF = ReadDoublePanels(ref idx, lines); }
                 else idx++;
             }
             return result;
