@@ -49,7 +49,7 @@ namespace ThermalComfort
                 "Default 1.0. Typical range: 0.5-8.0.",
                 GH_ParamAccess.item, 1.0);
             pManager.AddNumberParameter("Extinction Coeff", "k",
-                "Solar radiation extinction coefficient k [-] for Beer-Lambert law. " +
+                "Solar radiation (direct and diffuse solar radiation) extinction coefficient k [-] for Beer-Lambert law. " +
                 "Default 0.5. Typical range: 0.5-0.8 (broadleaf), 0.3-0.5 (conifer).",
                 GH_ParamAccess.item, 0.5);
             pManager.AddNumberParameter("Tree Temperature", "T_tree",
@@ -65,7 +65,7 @@ namespace ThermalComfort
                 "according to the transmittance parameter.",
                 GH_ParamAccess.list);
             pManager.AddNumberParameter("Transmittance", "τ",
-                "Direct solar radiation transmittance of translucent sunshades [-]. " +
+                "Shortwave radiation (direct and diffuse solar radiation) transmittance of translucent sunshades [-]. " +
                 "Default 0.05. Range: 0.0 (opaque) to 1.0 (fully transparent). " +
                 "Typical: perforated metal 0.05-0.15, fabric 0.02-0.30, PC sheet 0.60-0.85.",
                 GH_ParamAccess.item, 0.05);
