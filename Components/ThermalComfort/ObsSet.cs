@@ -61,7 +61,7 @@ namespace ThermalComfort
             // ---- Translucent shade parameters ----
             pManager.AddMeshParameter("Translucent Shade", "TransShade",
                 "Optional: Translucent sunshade / shading device mesh(es). " +
-                "These materials partially transmit direct solar radiation " +
+                "These materials partially transmit direct and diffuse solar radiation " +
                 "according to the transmittance parameter.",
                 GH_ParamAccess.list);
             pManager.AddNumberParameter("Transmittance", "τ",
@@ -78,7 +78,7 @@ namespace ThermalComfort
             // ---- Opaque obstacle parameters ----
             pManager.AddMeshParameter("Opaque Objects", "Opaque",
                 "Optional: Opaque obstacle meshes (buildings, walls, solid structures). " +
-                "These fully block direct solar radiation with no transmission.",
+                "These fully block solar radiation with no transmission.",
                 GH_ParamAccess.list);
             pManager.AddNumberParameter("Opaque Temperature", "T_opaque",
                 "Optional: Opaque obstacle surface temperature [C]. Single value or 8760 values (hourly). " +
