@@ -1,4 +1,4 @@
-﻿using Grasshopper.Kernel;
+using Grasshopper.Kernel;
 using NeosEnviSim.Properties;
 using Rhino.Geometry;
 using System;
@@ -23,6 +23,8 @@ namespace NeosExplorer
             pManager.AddNumberParameter("Radius", "R", "Interest radius (m)", GH_ParamAccess.item, 1.0);
             pManager.AddIntegerParameter("Stay Duration", "D", "Stay duration in time steps", GH_ParamAccess.item, 5);
             pManager.AddNumberParameter("Leave Probability", "LP", "Probability of leaving per step [0-1]", GH_ParamAccess.item, 0.05);
+            pManager.AddBooleanParameter("Use Index Order", "IO", "Visit order: false=auto by distance (default), true=by input index", GH_ParamAccess.item, false);
+            pManager.AddBooleanParameter("Keep Return Order", "KRO", "Return trip order: false=reverse (default), true=same as forward. Only effective when Use Index Order=true", GH_ParamAccess.item, false);
         }
 
         protected override void RegisterOutputParams(GH_OutputParamManager pManager)
@@ -38,33 +40,40 @@ namespace NeosExplorer
             double radius = 1.0;
             int duration = 5;
             double leaveProbability = 0.05;
+            bool useIndexOrder = false;
 
             if (!DA.GetDataList(0, agents)) return;
             if (!DA.GetDataList(1, positions)) return;
             DA.GetData(2, ref strength);
             DA.GetData(3, ref radius);
             DA.GetData(4, ref duration);
-            DA.GetData(5, ref leaveProbability); 
+            DA.GetData(5, ref leaveProbability);
+            DA.GetData(6, ref useIndexOrder);
+            bool keepReturnOrder = false;
+            DA.GetData(7, ref keepReturnOrder);
 
             List<Agent> updatedAgents = new List<Agent>();
 
             foreach (var agent in agents)
             {
                 Agent updatedAgent = agent.ShallowCopy();
-
-                // 兴趣点按与起点的距离值从小到大排序，确保访问的第一点是直线距离最近的
-                updatedAgent.InterestPoints = positions
-                    .OrderBy(p => p.DistanceTo(updatedAgent.InitialPosition))
-                    .ToList();
-                updatedAgent.InterestPoints = new List<Point3d>(positions);
-                updatedAgent.ClearInterestPoint();
-                updatedAgent.MoveToNextInterestPoint();
+                updatedAgent.UseIndexOrder = useIndexOrder;
+                updatedAgent.ReverseReturnOrder = keepReturnOrder;
 
                 if (positions.Count > 0)
                 {
-                    updatedAgent.InterestPoints = positions
-                        .OrderBy(p => p.DistanceTo(updatedAgent.InitialPosition))
-                        .ToList();
+                    if (useIndexOrder)
+                    {
+                        // 索引顺序模式：保持输入列表的原始顺序
+                        updatedAgent.InterestPoints = new List<Point3d>(positions);
+                    }
+                    else
+                    {
+                        // 自动模式：按与起点的距离从小到大排序
+                        updatedAgent.InterestPoints = positions
+                            .OrderBy(p => p.DistanceTo(updatedAgent.InitialPosition))
+                            .ToList();
+                    }
                     updatedAgent.ClearInterestPoint();
                     updatedAgent.MoveToNextInterestPoint();
                 }
@@ -77,7 +86,7 @@ namespace NeosExplorer
                 updatedAgent.InterestStrength = strength;
                 updatedAgent.InterestRadius = radius;
                 updatedAgent.StayDuration = duration;
-                updatedAgent.LeaveProbability = leaveProbability;// > 0.8 ? 0.8 : leaveProbability; 
+                updatedAgent.LeaveProbability = leaveProbability;
                 updatedAgents.Add(updatedAgent);
             }
 

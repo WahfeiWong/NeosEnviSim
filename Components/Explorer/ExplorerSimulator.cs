@@ -1,5 +1,4 @@
-﻿//2.0.6版
-using Grasshopper;
+﻿using Grasshopper;
 using Grasshopper.Kernel;
 using Grasshopper.Kernel.Data;
 using NeosEnviSim.Properties;

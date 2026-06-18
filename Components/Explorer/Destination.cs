@@ -1,4 +1,4 @@
-﻿using Grasshopper.Kernel;
+using Grasshopper.Kernel;
 using NeosEnviSim.Properties;
 using Rhino.Geometry;
 using System;
@@ -66,7 +66,11 @@ namespace NeosExplorer
 
                     if (returnAgent.InterestPoints != null && returnAgent.InterestPoints.Count > 0)
                     {
-                        returnAgent.InterestPoints.Reverse();
+                        // 仅在Keep Return Order为false时反转兴趣点次序（默认行为）
+                        if (!returnAgent.ReverseReturnOrder)
+                        {
+                            returnAgent.InterestPoints.Reverse();
+                        }
                         returnAgent.ClearInterestPoint();
                         returnAgent.MoveToNextInterestPoint();
                     }

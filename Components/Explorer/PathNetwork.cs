@@ -1,4 +1,4 @@
-﻿using Grasshopper.Kernel;
+using Grasshopper.Kernel;
 using NeosEnviSim.Properties;
 using Rhino.Geometry;
 using Rhino.Geometry.Intersect;
@@ -24,6 +24,7 @@ namespace NeosExplorer
             pManager.AddPointParameter("Destination", "DP", "Destination position", GH_ParamAccess.item);
             pManager.AddCurveParameter("Obstacles", "O", "Closed obstacle polyline(Draw counterclockwise)", GH_ParamAccess.list);
             pManager.AddNumberParameter("Navigation Offset", "NO", "Offset value for obstacle curves when finding navigation points (m)", GH_ParamAccess.item, 0.5);
+            pManager.AddBooleanParameter("Use Index Order", "IO", "Visit order: false=auto by distance (default), true=by input index", GH_ParamAccess.item, false);
 
             pManager[1].Optional = true;
             pManager[3].Optional = true;
@@ -52,6 +53,8 @@ namespace NeosExplorer
             if (!DA.GetData(2, ref end)) return;
             DA.GetDataList(3, obstacles);
             DA.GetData(4, ref offset);
+            bool useIndexOrder = false;
+            DA.GetData(5, ref useIndexOrder);
 
             // 2. Project all points to XY plane
             start.Z = 0;
@@ -193,14 +196,24 @@ namespace NeosExplorer
             List<double> segmentLengths = new List<double>();
             bool pathFound = true;
 
-            // === 修改点：按距起点的直线距离由近到远排序兴趣点 ===
-            List<Point3d> sortedPoints = points
-                .OrderBy(p => p.DistanceTo(start))  // 按距离排序
-                .ToList();
+            // 根据访问模式排序兴趣点
+            List<Point3d> sortedPoints;
+            if (useIndexOrder)
+            {
+                // 索引顺序模式：保持原始输入顺序
+                sortedPoints = new List<Point3d>(points);
+            }
+            else
+            {
+                // 自动模式：按距起点的直线距离由近到远排序
+                sortedPoints = points
+                    .OrderBy(p => p.DistanceTo(start))
+                    .ToList();
+            }
 
             // Create list of waypoints: start -> sorted interest points -> end
             List<Point3d> waypoints = new List<Point3d> { start };
-            waypoints.AddRange(sortedPoints);  // 使用排序后的兴趣点
+            waypoints.AddRange(sortedPoints);
             waypoints.Add(end);
 
             // Calculate path segments between waypoints

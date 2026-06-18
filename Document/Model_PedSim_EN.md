@@ -160,11 +160,17 @@ Path-following mode uses the visibility graph method combined with the A\* algor
 
 ### 3.2 Path Segmentation
 
-When multiple points of interest exist, the path is segmented and connected in ascending order of straight-line distance from the start point:
+When multiple points of interest exist, the waypoint connection order depends on the POI visit mode:
+
+**Auto mode (`UseIndexOrder = false`, default)**: POIs are sorted by ascending straight-line distance from the start point:
 
 $$\mathrm{waypoints} = [\mathbf{x}_{start}, \; \mathrm{sort}(\mathbf{x}_{POI}, \|\cdot - \mathbf{x}_{start}\|), \; \mathbf{x}_{end}]$$
 
-Each segment is independently solved via A\*, with duplicate points at junctions removed.
+**Index-order mode (`UseIndexOrder = true`)**: POIs are visited strictly in the original input list order:
+
+$$\mathrm{waypoints} = [\mathbf{x}_{start}, \; \mathbf{x}_{POI}^{(0)}, \; \mathbf{x}_{POI}^{(1)}, \; \dots, \; \mathbf{x}_{end}]$$
+
+Each segment is independently solved via A\*, with duplicate points at junctions removed. Index-order mode also supports return-trip order control: when `KeepReturnOrder = false` (default), the return trip visits POIs in reverse order; when `KeepReturnOrder = true`, the return trip follows the same order as the forward trip.
 
 ### 3.3 Visibility Test
 
@@ -248,14 +254,27 @@ where $\xi_i \sim U(0,1)$ is a uniform random number assigned at agent spawn.
 
 ### 6.1 POI Visit Mechanism
 
-Points of interest are sorted by ascending straight-line distance from the start point:
+POI visits support two modes, controlled by the `UseIndexOrder` parameter:
+
+**Auto mode (`UseIndexOrder = false`, default)**: POIs are sorted by ascending straight-line distance from the start point, using a greedy nearest-neighbor strategy:
 
 $$\mathrm{POI}_{sorted} = \mathrm{sort}(\{\mathbf{x}_{POI}\}, \; \|\cdot - \mathbf{x}_{start}\|)$$
+
+**Index-order mode (`UseIndexOrder = true`)**: POIs are visited strictly in the original input list order without re-sorting.
 
 When an agent reaches a POI (distance $< r_{interest}$), it enters a dwell state:
 - Dwell counter initialized to `StayDuration`
 - Each step attempts to leave with probability $p_{leave}$
 - If the dwell counter reaches zero, the agent is forced to leave
+
+#### Return-Trip Order Control
+
+When index-order mode is enabled, the `KeepReturnOrder` parameter controls the return-trip POI visit order (only effective when `Add Return Trip = true`):
+
+| Parameter | Default | Forward Visit | Return Visit |
+|-----------|---------|---------------|--------------|
+| `KeepReturnOrder = false` | default | 0 → 1 → 2 | 2 → 1 → 0 (reversed) |
+| `KeepReturnOrder = true` | | 0 → 1 → 2 | 0 → 1 → 2 (same as forward) |
 
 ### 6.2 Dwell Parameters
 
@@ -269,6 +288,13 @@ When an agent reaches a POI (distance $< r_{interest}$), it enters a dwell state
 | Destination radius | $r_{dest}$ | $\mathrm{m}$ | Distance threshold for destination arrival | 1.0 | [0.01, 10.0] |
 
 > **Note:** `GetCurrentStrengthFactor()` returns the POI strength when the agent has unvisited POIs; otherwise returns the destination strength.
+
+### 6.3 Visit Order Control Parameters
+
+| Parameter | Symbol | Unit | Description | Default | Range |
+|-----------|--------|------|-------------|---------|-------|
+| Use Index Order | `IO` | -- | `false`=auto sort by distance, `true`=by input index order | false | {false, true} |
+| Keep Return Order | `KRO` | -- | `false`=reverse on return (default), `true`=same as forward; only effective when `IO = true` | false | {false, true} |
 
 ---
 
@@ -389,6 +415,8 @@ $$t_{evac} = n_{step} \cdot \Delta t$$
 | 3 | `R` | Number | No | Arrival radius $r_{interest}$ [m] (default 1.0) |
 | 4 | `D` | Integer | No | Stay duration $T_{stay}$ [steps] (default 5) |
 | 5 | `LP` | Number | No | Leave probability $p_{leave}$ (default 0.05) |
+| 6 | `IO` | Boolean | No | Use index order: `false`=auto sort by distance (default), `true`=by input index order |
+| 7 | `KRO` | Boolean | No | Keep return order: `false`=reverse on return (default), `true`=same as forward; only effective when `IO = true` |
 
 **Output:** Updated Agent list (`A`)
 
@@ -459,6 +487,7 @@ Ports same as Pedestrian Simulator. Additional outputs:
 | 2 | `DP` | Point | **Yes** | Destination |
 | 3 | `O` | Curve | No | Obstacle curve list (optional) |
 | 4 | `NO` | Number | No | Navigation offset $\delta_{nav}$ [m] (default 0.5) |
+| 5 | `IO` | Boolean | No | Use index order: `false`=auto sort by distance (default), `true`=by input index order |
 
 | Output | Name | Type | Description |
 |--------|------|------|-------------|

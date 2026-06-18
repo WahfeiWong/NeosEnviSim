@@ -1,4 +1,4 @@
-﻿using Grasshopper.Kernel;
+using Grasshopper.Kernel;
 using NeosEnviSim.Properties;
 using Rhino.Geometry;
 using System;
@@ -127,6 +127,13 @@ namespace NeosExplorer
         public List<Point3d> InterestPoints { get; set; } = new List<Point3d>();
         private int _currentInterestIndex = -1;
         public int CurrentInterestPointIndex { get; set; } = -1;
+
+        // 兴趣点访问次序控制：false=自动按距离排序（默认），true=按输入索引顺序
+        public bool UseIndexOrder { get; set; } = false;
+
+        // 返程兴趣点次序控制：false=反转次序（默认，如2-1-0），true=与正向一致（如0-1-2），仅在UseIndexOrder=true时有效
+        public bool ReverseReturnOrder { get; set; } = false;
+
         // 目的地
         public Point3d Destination { get; set; }
         public double DestinationStrength { get; set; } = 1.0;
@@ -241,7 +248,7 @@ namespace NeosExplorer
             return false;
         }
 
-        //兴趣点访问方法，按兴趣点从近到远依次访问
+        //兴趣点访问方法，支持自动距离排序和索引顺序两种模式
         public bool MoveToNextInterestPoint()
         {
             // 如果没有兴趣点，返回false
@@ -251,14 +258,29 @@ namespace NeosExplorer
                 return false;
             }
 
-            // 首次设置（选择距离起点最近的点）
+            // 首次设置（选择第一个点）
             if (_currentInterestIndex < 0)
             {
                 _currentInterestIndex = 0;
                 return true;
             }
 
-            // 找到下一个最近的点
+            // 索引顺序模式：直接按列表索引依次访问
+            if (UseIndexOrder)
+            {
+                if (_currentInterestIndex + 1 < InterestPoints.Count)
+                {
+                    _currentInterestIndex++;
+                    return true;
+                }
+                else
+                {
+                    _currentInterestIndex = -1;
+                    return false;
+                }
+            }
+
+            // 自动模式：找到下一个最近的点（贪心算法）
             Point3d lastVisited = InterestPoints[_currentInterestIndex];
             double minDistance = double.MaxValue;
             int nextIndex = -1;
@@ -327,6 +349,8 @@ namespace NeosExplorer
                 InterestPoints = new List<Point3d>(this.InterestPoints),
                 _currentInterestIndex = this._currentInterestIndex,
                 CurrentInterestPointIndex = this.CurrentInterestPointIndex,
+                UseIndexOrder = this.UseIndexOrder,
+                ReverseReturnOrder = this.ReverseReturnOrder,
 
                 // 目的地
                 Destination = Destination,

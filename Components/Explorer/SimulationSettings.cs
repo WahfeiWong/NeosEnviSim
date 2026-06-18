@@ -24,7 +24,6 @@ namespace NeosExplorer
             pManager.AddNumberParameter("Damping Coefficient", "DC", "Velocity damping coefficient [0-1]", GH_ParamAccess.item, 0.5);
             pManager.AddNumberParameter("Navigation Offset", "NO", "Offset value for obstacle curves when finding navigation points (m)", GH_ParamAccess.item, 0.5);
             pManager.AddNumberParameter("Evacuation Completion Ratio", "ECR", "evacuated agents / initial agents in evacuation area.[0-1]", GH_ParamAccess.item, 0.95);
-            // 新增参数：漫游比例
             pManager.AddNumberParameter("Wander Ratio", "WR", "Ratio of agents using explorer mode [0.0 = All Pedestrian, 1.0 = All Explorer]" +
                 "\n(just for Hybrid Simulator)", GH_ParamAccess.item, 0.0);
         }
@@ -58,7 +57,7 @@ namespace NeosExplorer
             DA.GetData(7, ref dampingCoefficient);
             DA.GetData(8, ref navigationOffset);
             DA.GetData(9, ref evacuationRatio);
-            DA.GetData(10, ref wanderRatio); // 获取漫游比例
+            DA.GetData(10, ref wanderRatio); 
 
             // 限制比例在0-1之间
             wanderRatio = Math.Max(0.0, Math.Min(1.0, wanderRatio));

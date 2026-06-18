@@ -169,11 +169,17 @@ $$\|\mathbf{v}_i\| = \min\left( \|\mathbf{v}_i\|, \; v_i^{max} \right)$$
 
 ### 3.2 路径分段
 
-当存在多个兴趣点时，路径按兴趣点与起点的直线距离升序分段连接：
+当存在多个兴趣点时，路径分段的连接顺序取决于兴趣点访问模式：
+
+**自动模式（`UseIndexOrder = false`，默认）**：兴趣点按与起点的直线距离升序排列：
 
 $$\mathrm{waypoints} = [\mathbf{x}_{start}, \; \mathrm{sort}(\mathbf{x}_{POI}, \|\cdot - \mathbf{x}_{start}\|), \; \mathbf{x}_{end}]$$
 
-每段路径独立调用 A\* 并在连接处去重。
+**索引顺序模式（`UseIndexOrder = true`）**：兴趣点严格按输入列表的原始索引顺序访问：
+
+$$\mathrm{waypoints} = [\mathbf{x}_{start}, \; \mathbf{x}_{POI}^{(0)}, \; \mathbf{x}_{POI}^{(1)}, \; \dots, \; \mathbf{x}_{end}]$$
+
+每段路径独立调用 A\* 并在连接处去重。索引顺序模式同时支持返程次序控制：当 `KeepReturnOrder = false`（默认）时返程兴趣点次序反转；当 `KeepReturnOrder = true` 时返程与正向访问次序一致。
 
 ### 3.3 可见性判断
 
@@ -257,14 +263,27 @@ $$\mathrm{mode}_i = \begin{cases} \text{PathFollowing} & \text{if } \xi_i \geq W
 
 ### 6.1 兴趣点访问机制
 
-兴趣点按与起点的直线距离升序排列：
+兴趣点访问支持两种模式，由 `UseIndexOrder` 参数控制：
+
+**自动模式（`UseIndexOrder = false`，默认）**：兴趣点按与起点的直线距离升序排列，采用贪心最近邻策略依次访问：
 
 $$\mathrm{POI}_{sorted} = \mathrm{sort}(\{\mathbf{x}_{POI}\}, \; \|\cdot - \mathbf{x}_{start}\|)$$
+
+**索引顺序模式（`UseIndexOrder = true`）**：兴趣点严格按输入列表的原始索引顺序依次访问，不重新排序。
 
 代理到达兴趣点（距离 $< r_{interest}$）后进入停留状态：
 - 停留计数器初始化为 `StayDuration`
 - 每步以概率 $p_{leave}$ 尝试离开
 - 若停留计数器归零，强制离开
+
+#### 返程次序控制
+
+当启用索引顺序模式时，可通过 `KeepReturnOrder` 参数控制返程代理的兴趣点访问次序（仅在 `Add Return Trip = true` 时生效）：
+
+| 参数 | 默认值 | 正向访问 | 返程访问 |
+|------|--------|----------|----------|
+| `KeepReturnOrder = false` | 默认 | 0 → 1 → 2 | 2 → 1 → 0（反转）|
+| `KeepReturnOrder = true` | | 0 → 1 → 2 | 0 → 1 → 2（一致）|
 
 ### 6.2 停留参数
 
@@ -278,6 +297,13 @@ $$\mathrm{POI}_{sorted} = \mathrm{sort}(\{\mathbf{x}_{POI}\}, \; \|\cdot - \math
 | 目的地半径 | $r_{dest}$ | $\mathrm{m}$ | 判定到达目的地的距离阈值 | 1.0 | [0.01, 10.0] |
 
 > **注意：** 当代理还有未访问的兴趣点时，`GetCurrentStrengthFactor()` 返回兴趣点强度；否则返回目的地强度。
+
+### 6.3 访问次序控制参数
+
+| 参数 | 符号 | 单位 | 说明 | 默认值 | 范围 |
+|-----------|--------|------|-------------|---------|-------|
+| 使用索引顺序 | `IO` | -- | `false`=自动按距离排序，`true`=按输入索引顺序 | false | {false, true} |
+| 保持返程顺序 | `KRO` | -- | `false`=返程反转（默认），`true`=与正向一致；仅在 `IO = true` 时有效 | false | {false, true} |
 
 ---
 
@@ -398,6 +424,8 @@ $$t_{evac} = n_{step} \cdot \Delta t$$
 | 3 | `R` | Number | 否 | 到达半径 $r_{interest}$ [m]（默认 1.0） |
 | 4 | `D` | Integer | 否 | 停留时长 $T_{stay}$ [steps]（默认 5） |
 | 5 | `LP` | Number | 否 | 离开概率 $p_{leave}$（默认 0.05） |
+| 6 | `IO` | Boolean | 否 | 使用索引顺序：`false`=自动按距离排序（默认），`true`=按输入索引顺序 |
+| 7 | `KRO` | Boolean | 否 | 保持返程顺序：`false`=返程反转（默认），`true`=与正向一致；仅在 `IO = true` 时有效 |
 
 **输出：** 更新后的 Agent 列表 (`A`)
 
@@ -468,6 +496,7 @@ $$t_{evac} = n_{step} \cdot \Delta t$$
 | 2 | `DP` | Point | **是** | 终点 |
 | 3 | `O` | Curve | 否 | 障碍物曲线列表（可选） |
 | 4 | `NO` | Number | 否 | 导航偏移 $\delta_{nav}$ [m]（默认 0.5） |
+| 5 | `IO` | Boolean | 否 | 使用索引顺序：`false`=自动按距离排序（默认），`true`=按输入索引顺序 |
 
 | 输出 | 名称 | 类型 | 说明 |
 |------|------|------|-------------|

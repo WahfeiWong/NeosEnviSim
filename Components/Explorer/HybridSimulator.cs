@@ -1,4 +1,4 @@
-﻿﻿using Grasshopper;
+﻿using Grasshopper;
 using Grasshopper.Kernel;
 using Grasshopper.Kernel.Data;
 using NeosEnviSim.Properties;
@@ -563,7 +563,7 @@ namespace NeosExplorer
                     Point3d start = kvp.Value.Position; start.Z = 0;
                     Point3d end = kvp.Value.Destination; end.Z = 0;
                     List<Point3d> interests = kvp.Value.InterestPoints.Select(p => { var pt = p; pt.Z = 0; return pt; }).ToList();
-                    Polyline path = PedestrianSimulator.CalculateStaticPath(start, interests, end, obstacles, offset);
+                    Polyline path = PedestrianSimulator.CalculateStaticPath(start, interests, end, obstacles, offset, kvp.Value.UseIndexOrder);
                     if (path != null && path.Count >= 2) _spawnPointStaticPaths[kvp.Key] = path;
                 }
                 catch { }

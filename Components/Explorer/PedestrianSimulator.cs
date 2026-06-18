@@ -1,4 +1,4 @@
-﻿using Grasshopper;
+using Grasshopper;
 using Grasshopper.Kernel;
 using Grasshopper.Kernel.Data;
 using NeosEnviSim.Properties;
@@ -347,7 +347,7 @@ namespace NeosExplorer
                         }
 
                         // 计算路径
-                        Polyline path = CalculateStaticPath(start, interestPoints, end, obstacles, navigationOffset);
+                        Polyline path = CalculateStaticPath(start, interestPoints, end, obstacles, navigationOffset, spawnPoint.UseIndexOrder);
 
                         if (path != null && path.Count >= 2)
                         {
@@ -365,7 +365,7 @@ namespace NeosExplorer
 
         // 基于可见性图与Astar算法的静态路径计算方法
         public static Polyline CalculateStaticPath(Point3d start, List<Point3d> interestPoints, Point3d end,
-                                           List<Obstacle> obstacles, double navigationOffset)
+                                           List<Obstacle> obstacles, double navigationOffset, bool useIndexOrder = false)
         {
             try
             {
@@ -498,10 +498,20 @@ namespace NeosExplorer
                 // 9. 构建图
                 Graph networkGraph = BuildGraph(allVertices, validConnections, comparer);
 
-                // 10. 排序兴趣点（按距起点的直线距离）
-                List<Point3d> sortedPoints = points
-                    .OrderBy(p => p.DistanceTo(start))
-                    .ToList();
+                // 10. 根据访问模式排序兴趣点
+                List<Point3d> sortedPoints;
+                if (useIndexOrder)
+                {
+                    // 索引顺序模式：保持原始输入顺序
+                    sortedPoints = new List<Point3d>(points);
+                }
+                else
+                {
+                    // 自动模式：按距起点的直线距离排序
+                    sortedPoints = points
+                        .OrderBy(p => p.DistanceTo(start))
+                        .ToList();
+                }
 
                 // 11. 创建路径点序列
                 List<Point3d> waypoints = new List<Point3d> { start };
