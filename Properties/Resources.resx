@@ -232,6 +232,9 @@
   <data name="icon_measurementSurface" type="System.Resources.ResXFileRef, System.Windows.Forms">
     <value>..\Resources\icon_measurementSurface.png;System.Drawing.Bitmap, System.Drawing, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a</value>
   </data>
+  <data name="icon_measureMRTpng" type="System.Resources.ResXFileRef, System.Windows.Forms">
+    <value>..\Resources\icon_measureMRTpng.png;System.Drawing.Bitmap, System.Drawing, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a</value>
+  </data>
   <data name="icon_MRTcal" type="System.Resources.ResXFileRef, System.Windows.Forms">
     <value>..\Resources\icon_MRTcal.png;System.Drawing.Bitmap, System.Drawing, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a</value>
   </data>
