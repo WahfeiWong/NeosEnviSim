@@ -8,10 +8,12 @@
 //
 // Inputs:    tg     - Globe temperature [°C]
 //            ta     - Air temperature [°C]  
-//            ws     - Air velocity [m/s] (used only for forced convection)
+//            ws     - Air velocity [m/s] (actual measured wind speed)
 //            D      - Globe diameter [m] (default 0.15 m)
 //            eps    - Globe emissivity (default 0.95)
-//            forced - Forced convection toggle (false = natural, true = forced)
+//            vth    - Wind speed threshold [m/s] for forced/natural convection
+//                     (default 0.3). If ws ≥ vth, forced convection equation is used;
+//                     otherwise natural convection equation is used.
 //
 // Outputs:   mrt    - Mean radiant temperature [°C]
 //            hcg    - Convective heat transfer coefficient [W/(m²·K)] (debug)
@@ -61,7 +63,7 @@ namespace ThermalComfort
     /// is simultaneously affected by radiative exchange with the surroundings
     /// and convective exchange with the air.
     /// </summary>
-    public class MrtComponent : GH_Component
+    public class MeasureMrtComponent : GH_Component
     {
         // =====================================================================
         // Physical Constants
@@ -97,6 +99,12 @@ namespace ThermalComfort
         private const double DEFAULT_GLOBE_EMISSIVITY = 0.95;
 
         /// <summary>
+        /// Default wind speed threshold for forced/natural convection [m/s]
+        /// When measured wind speed >= this value, forced convection equation is used.
+        /// </summary>
+        private const double DEFAULT_FORCED_THRESHOLD = 0.3;
+
+        /// <summary>
         /// Empirical constant for natural convection heat transfer coefficient
         /// Source: ISO 7726:1998, Equation (B.3)
         /// </summary>
@@ -115,11 +123,11 @@ namespace ThermalComfort
         /// <summary>
         /// Initialises a new instance of the MRT calculator component.
         /// </summary>
-        public MrtComponent()
+        public MeasureMrtComponent()
             : base(
                 name: "Measure MRT",
                 nickname: "MRT",
-                description: "Mean Radiant Temperature (MRT) calculator based on ISO 7726:1998. It calculates MRT from globe temperature, air temperature, and air velocity.",
+                description: "Mean Radiant Temperature (MRT) calculator based on ISO 7726:1998. It calculates MRT from globe temperature, air temperature, and air velocity. The convection regime (natural or forced) is automatically determined by comparing the measured wind speed against a user-defined threshold.",
                 category: "Neos",
                 subCategory: "Thermophysics")
         {
@@ -167,8 +175,8 @@ namespace ThermalComfort
             // Input 2: Wind speed [ws]
             pManager.AddNumberParameter(
                 name: "Wind Speed",
-                nickname: "va",
-                description: "Wind speed [m/s]. Used only when forced convection mode (forced=true) is selected. Ignored in natural convection mode.",
+                nickname: "Va",
+                description: "Measured wind speed [m/s]. This is the actual air velocity around the globe.",
                 access: GH_ParamAccess.item,
                 @default: 0.0);
 
@@ -183,18 +191,18 @@ namespace ThermalComfort
             // Input 4: Globe emissivity [eps]
             pManager.AddNumberParameter(
                 name: "Emissivity",
-                nickname: "E",
+                nickname: "Emi",
                 description: "Globe surface emissivity [dimensionless, 0~1]. Default is 0.95 (standard matt black paint coating).",
                 access: GH_ParamAccess.item,
                 @default: DEFAULT_GLOBE_EMISSIVITY);
 
-            // Input 5: Forced convection toggle [forced]
-            pManager.AddBooleanParameter(
-                name: "Forced Convection",
-                nickname: "FC",
-                description: "Forced convection toggle. false = natural convection (default, for indoor low‑wind environments); true = forced convection (outdoor windy conditions, requires wind speed input).",
+            // Input 5: Wind speed threshold for forced convection [vth]
+            pManager.AddNumberParameter(
+                name: "Forced Threshold",
+                nickname: "Vth",
+                description: "Wind speed threshold [m/s] for switching between natural and forced convection. If measured wind speed >= this value, forced convection equation (ISO 7726 B.4) is used; otherwise natural convection (B.3). Default is 0.3 m/s.",
                 access: GH_ParamAccess.item,
-                @default: false);
+                @default: DEFAULT_FORCED_THRESHOLD);
         }
 
         // =====================================================================
@@ -241,14 +249,14 @@ namespace ThermalComfort
             double ws = 0.0;
             double D = DEFAULT_GLOBE_DIAMETER;
             double eps = DEFAULT_GLOBE_EMISSIVITY;
-            bool forced = false;
+            double vth = DEFAULT_FORCED_THRESHOLD;
 
             if (!DA.GetData(0, ref tg)) return;
             if (!DA.GetData(1, ref ta)) return;
             if (!DA.GetData(2, ref ws)) return;
             if (!DA.GetData(3, ref D)) return;
             if (!DA.GetData(4, ref eps)) return;
-            if (!DA.GetData(5, ref forced)) return;
+            if (!DA.GetData(5, ref vth)) return;
 
             // -----------------------------------------------------------------
             // Step 2: Validate parameter validity
@@ -278,8 +286,45 @@ namespace ThermalComfort
                 return;
             }
 
+            if (vth < 0)
+            {
+                AddRuntimeMessage(
+                    GH_RuntimeMessageLevel.Error,
+                    "Wind speed threshold cannot be negative.");
+                return;
+            }
+
             // -----------------------------------------------------------------
-            // Step 3: Calculate convective heat transfer coefficient h_cg [W/(m²·K)]
+            // Step 3: Determine convection regime based on measured wind speed vs. threshold
+            // -----------------------------------------------------------------
+
+            bool useForced = (ws >= vth);
+
+            // Provide a hint to the user about which regime is selected
+            if (useForced)
+            {
+                AddRuntimeMessage(
+                    GH_RuntimeMessageLevel.Remark,
+                    $"Wind speed ({ws:F2} m/s) ≥ threshold ({vth:F2} m/s) → Using FORCED convection equation (ISO 7726 B.4).");
+            }
+            else
+            {
+                if (ws > 0)
+                {
+                    AddRuntimeMessage(
+                        GH_RuntimeMessageLevel.Remark,
+                        $"Wind speed ({ws:F2} m/s) < threshold ({vth:F2} m/s) → Using NATURAL convection equation (ISO 7726 B.3).");
+                }
+                else
+                {
+                    AddRuntimeMessage(
+                        GH_RuntimeMessageLevel.Remark,
+                        "Wind speed is zero → Using NATURAL convection equation (ISO 7726 B.3).");
+                }
+            }
+
+            // -----------------------------------------------------------------
+            // Step 4: Calculate convective heat transfer coefficient h_cg [W/(m²·K)]
             // -----------------------------------------------------------------
             // Natural convection (Eq. B.3):  h_cg = 1.4 * ((|tg - ta|) / D)^0.25
             // Forced convection (Eq. B.4):   h_cg = 6.3 * (v^0.6 / D^0.4)
@@ -287,19 +332,26 @@ namespace ThermalComfort
 
             double hcg = 0.0;
 
-            if (forced)
+            if (useForced)
             {
-                hcg = FORCED_CONV_CONST * Math.Pow(ws, 0.6) / Math.Pow(D, 0.4);
-
+                // Forced convection – requires positive wind speed (if ws=0, division by zero is avoided but we still compute)
                 if (ws == 0)
                 {
                     AddRuntimeMessage(
                         GH_RuntimeMessageLevel.Warning,
-                        "Wind speed is zero in forced convection mode. Results may be inaccurate; consider switching to natural convection mode.");
+                        "Wind speed is zero but forced convection was selected (ws ≥ threshold?). This may lead to division by zero. Check your threshold value.");
+                    // In this case, we could fall back to natural, but we'll let the equation produce 0/Inf.
+                    // To avoid crash, set hcg = 0 and warn.
+                    hcg = 0;
+                }
+                else
+                {
+                    hcg = FORCED_CONV_CONST * Math.Pow(ws, 0.6) / Math.Pow(D, 0.4);
                 }
             }
             else
             {
+                // Natural convection
                 double dt = Math.Abs(tg - ta);
                 if (dt < 1e-12)
                     hcg = 0.0;
@@ -308,7 +360,7 @@ namespace ThermalComfort
             }
 
             // -----------------------------------------------------------------
-            // Step 4: Compute MRT⁴ (Kelvin⁴) and validate physical bounds
+            // Step 5: Compute MRT⁴ (Kelvin⁴) and validate physical bounds
             // -----------------------------------------------------------------
             // ISO 7726:1998, Eq. (B.1):
             //   MRT_K^4 = Tg_K^4 + (h_cg / (eps * sigma)) * (tg - ta)
@@ -331,7 +383,7 @@ namespace ThermalComfort
             }
 
             // -----------------------------------------------------------------
-            // Step 5: Convert back to Celsius and final validation
+            // Step 6: Convert back to Celsius and final validation
             // -----------------------------------------------------------------
 
             double mrt = Math.Pow(mrtK4, 0.25) - OFFSET;
@@ -345,7 +397,7 @@ namespace ThermalComfort
             }
 
             // -----------------------------------------------------------------
-            // Step 6: Set output data by numeric index
+            // Step 7: Set output data by numeric index
             // (Indices correspond to the order in RegisterOutputParams)
             // -----------------------------------------------------------------
 
