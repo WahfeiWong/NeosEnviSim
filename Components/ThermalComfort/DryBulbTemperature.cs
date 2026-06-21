@@ -299,7 +299,7 @@ namespace ThermalComfort
         }
 
 
-        public override GH_Exposure Exposure => GH_Exposure.primary;
+        public override GH_Exposure Exposure => GH_Exposure.quarternary;
         protected override System.Drawing.Bitmap Icon => Resources.icon_CalTa;
         public override Guid ComponentGuid
         {

@@ -286,7 +286,7 @@ namespace ThermalComfort
         }
 
 
-        public override GH_Exposure Exposure => GH_Exposure.primary;
+        public override GH_Exposure Exposure => GH_Exposure.quarternary;
         protected override System.Drawing.Bitmap Icon => Resources.icon_WtoRH2;
         public override Guid ComponentGuid => new Guid("{818BC2AD-1B8D-45A0-BEF0-53E6D24792A6}");
     }

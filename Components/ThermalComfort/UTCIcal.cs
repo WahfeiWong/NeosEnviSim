@@ -301,7 +301,7 @@ namespace ThermalComfort
             return UTCI;
         }
 
-
+        public override GH_Exposure Exposure => GH_Exposure.quarternary;
         protected override System.Drawing.Bitmap Icon => Resources.icon_UTCI;
         public override Guid ComponentGuid => new Guid("68A1634B-705A-4BB8-97F3-1CA3A3B4CB23");
     }

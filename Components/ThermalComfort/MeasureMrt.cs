@@ -409,7 +409,7 @@ namespace ThermalComfort
         // Component Exposure & Icon
         // =====================================================================
 
-        public override GH_Exposure Exposure => GH_Exposure.primary;
+        public override GH_Exposure Exposure => GH_Exposure.quarternary;
         protected override System.Drawing.Bitmap Icon => Resources.icon_measureMRTpng;
     }
 }
