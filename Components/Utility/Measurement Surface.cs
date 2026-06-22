@@ -122,7 +122,7 @@ namespace NeosUtility
             DA.SetDataTree(3, normalTree);
         }
 
-        public override GH_Exposure Exposure => GH_Exposure.secondary;
+        public override GH_Exposure Exposure => GH_Exposure.primary;
         public override Guid ComponentGuid => new Guid("4617F675-11C2-4D72-B649-FE12F7C2E961");
 
         protected override System.Drawing.Bitmap Icon

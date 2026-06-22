@@ -873,6 +873,16 @@ namespace NeosEnviSim.Properties {
         /// <summary>
         ///   查找 System.Drawing.Bitmap 类型的本地化资源。
         /// </summary>
+        internal static System.Drawing.Bitmap icon_TreeGen {
+            get {
+                object obj = ResourceManager.GetObject("icon_TreeGen", resourceCulture);
+                return ((System.Drawing.Bitmap)(obj));
+            }
+        }
+        
+        /// <summary>
+        ///   查找 System.Drawing.Bitmap 类型的本地化资源。
+        /// </summary>
         internal static System.Drawing.Bitmap icon_TreeProcessor {
             get {
                 object obj = ResourceManager.GetObject("icon_TreeProcessor", resourceCulture);
