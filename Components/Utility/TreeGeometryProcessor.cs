@@ -373,7 +373,7 @@ namespace NeosUtility
 
         protected override void RegisterInputParams(GH_Component.GH_InputParamManager pManager)
         {
-            pManager.AddMeshParameter("Tree Model", "T", "Detailed tree geometry (one or more meshes)", GH_ParamAccess.list);
+            pManager.AddMeshParameter("Tree Model", "TM", "Detailed tree geometry (one or more meshes)", GH_ParamAccess.list);
             pManager.AddNumberParameter("Height", "H", "Tree height", GH_ParamAccess.item);
             pManager.AddNumberParameter("Crown Radius", "R", "Crown radius", GH_ParamAccess.item);
             pManager.AddPointParameter("Plant Point", "P", "Planting point (default origin)", GH_ParamAccess.item, Point3d.Origin);
