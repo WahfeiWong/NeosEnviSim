@@ -374,9 +374,9 @@ namespace NeosUtility
         protected override void RegisterInputParams(GH_Component.GH_InputParamManager pManager)
         {
             pManager.AddMeshParameter("Tree Model", "TM", "Detailed tree geometry (one or more meshes)", GH_ParamAccess.list);
-            pManager.AddNumberParameter("Height", "H", "Tree height", GH_ParamAccess.item);
-            pManager.AddNumberParameter("Crown Radius", "R", "Crown radius", GH_ParamAccess.item);
             pManager.AddPointParameter("Plant Point", "P", "Planting point (default origin)", GH_ParamAccess.item, Point3d.Origin);
+            pManager.AddNumberParameter("Height", "H", "Tree height", GH_ParamAccess.item, 7);
+            pManager.AddNumberParameter("Crown Radius", "R", "Crown radius", GH_ParamAccess.item, 3);
             pManager.AddNumberParameter("Edge Length", "L", "Grid spacing for shrink wrap mesh (TargetEdgeLength), controls mesh resolution", GH_ParamAccess.item, 1.0);
             pManager.AddBooleanParameter("ShrinkWrap", "SW", "If true, use ShrinkWrap to generate crown mesh; if false, use Convex Hull", GH_ParamAccess.item, true);
         }
@@ -403,9 +403,9 @@ namespace NeosUtility
             bool useShrinkWrap = true;
 
             if (!DA.GetDataList(0, ghMeshes)) return;
-            if (!DA.GetData(1, ref height)) return;
-            if (!DA.GetData(2, ref crownRadius)) return;
-            if (!DA.GetData(3, ref plantPoint)) return;
+            if (!DA.GetData(1, ref plantPoint)) return;
+            if (!DA.GetData(2, ref height)) return;
+            if (!DA.GetData(3, ref crownRadius)) return;
             if (!DA.GetData(4, ref shrinkEdgeLen)) return;
             if (!DA.GetData(5, ref useShrinkWrap)) return;
 

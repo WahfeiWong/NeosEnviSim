@@ -31,13 +31,13 @@ namespace NeosUtility
             // Branch Lines from Tree Generator
             pManager.AddCurveParameter("Branch Lines", "BL", "Branch lines output from the Tree Generator component.", GH_ParamAccess.list);
             // Cluster Count
-            pManager.AddIntegerParameter("Cluster Count", "CC", "Number of leaf clusters to distribute on the canopy surface. Default: 100.", GH_ParamAccess.item, 100);
+            pManager.AddIntegerParameter("Cluster Count", "CC", "Number of leaf clusters to distribute on the canopy surface. Default: 100.", GH_ParamAccess.item, 500);
             // Distribution Seed
             pManager.AddIntegerParameter("Distribution Seed", "DS", "Random seed for leaf cluster distribution on hull surface. Default: 0.", GH_ParamAccess.item, 0);
             // Scale Factor
             pManager.AddNumberParameter("Scale Factor", "SF", "Scale factor for all leaf clusters. Use -1 for random scaling within Scale Range. Default: -1.", GH_ParamAccess.item, -1);
             // Scale Range
-            pManager.AddIntervalParameter("Scale Range", "SR", "Scale range when SF=-1. Default: 0.1 to 1.2.", GH_ParamAccess.item, new Interval(0.1, 1.2));
+            pManager.AddIntervalParameter("Scale Range", "SR", "Scale range when SF=-1. Default: 0.1 to 1.2.", GH_ParamAccess.item, new Interval(0.1, 3.0));
             // Scale Seed
             pManager.AddIntegerParameter("Scale Seed", "SS", "Random seed for leaf cluster scaling (only used when SF=-1). Default: 0.", GH_ParamAccess.item, 0);
 
