@@ -148,8 +148,8 @@ $$S = M + Q + C + E + \text{Res}$$
 **STI（主观温度指数）计算：**
 
 $$\text{STI} = \begin{cases}
-\text{MRT} - \left\{\left[\frac{|S|^{0.75}}{\varepsilon_h \cdot \sigma} + 273^4\right]^{0.25} - 273\right\} & S < 0 \\
-\text{MRT} + \left\{\left[\frac{|S|^{0.75}}{\varepsilon_h \cdot \sigma} + 273^4\right]^{0.25} - 273\right\} & S \geq 0
+\text{MRT} - \left\lbrace\left[\frac{|S|^{0.75}}{\varepsilon_h \cdot \sigma} + 273^4\right]^{0.25} - 273\right\rbrace & S < 0 \\
+\text{MRT} + \left\lbrace\left[\frac{|S|^{0.75}}{\varepsilon_h \cdot \sigma} + 273^4\right]^{0.25} - 273\right\rbrace & S \geq 0
 \end{cases}$$
 
 **PhS 比值（生理应变比）：**
@@ -212,8 +212,8 @@ $$S_R = M + Q_R + C_R + E_R + \text{Res}$$
 ### 1.6 PST（生理主观温度）
 
 $$\text{PST} = \begin{cases}
-\text{iMRT} - \left\{\left[\frac{|S_R|^{0.75}}{\varepsilon_h \cdot \sigma} + 273^4\right]^{0.25} - 273\right\} & S_R < 0 \\
-\text{iMRT} + \left\{\left[\frac{|S_R|^{0.75}}{\varepsilon_h \cdot \sigma} + 273^4\right]^{0.25} - 273\right\} & S_R \geq 0
+\text{iMRT} - \left\lbrace\left[\frac{|S_R|^{0.75}}{\varepsilon_h \cdot \sigma} + 273^4\right]^{0.25} - 273\right\rbrace & S_R < 0 \\
+\text{iMRT} + \left\lbrace\left[\frac{|S_R|^{0.75}}{\varepsilon_h \cdot \sigma} + 273^4\right]^{0.25} - 273\right\rbrace & S_R \geq 0
 \end{cases}$$
 
 ### 1.7 总热损失
