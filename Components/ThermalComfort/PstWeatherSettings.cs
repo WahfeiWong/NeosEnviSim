@@ -74,7 +74,7 @@ namespace ThermalComfort
             pManager.AddNumberParameter("MRT", "MRT", 
                 "Mean radiant temperature (degC). Should be measured or calculated " +
                 "externally (e.g., via RayMan or globe thermometer method).", 
-                GH_ParamAccess.item);
+                GH_ParamAccess.item,30);
             
             // Cloud cover (%), optional for ground temperature estimation
             pManager.AddNumberParameter("CloudCover", "CC",
