@@ -156,6 +156,11 @@ namespace ThermalComfort
                 Icl = h.CloValue;
             }
             Icl = Math.Max(0.1, Math.Min(3.5, Icl));
+            // 输出内部计算使用的 Icl 值（Remark 级别）
+            AddRuntimeMessage(GH_RuntimeMessageLevel.Remark,
+                $"Used clothing insulation Icl = {Icl:F2} clo " +
+                $"(AutoClo = {(h.AutoClo ? "ON" : "OFF")}, " +
+                $"AirTemp = {w.AirTemp:F1}°C)");
 
             // Ground surface temperature Tg (degC)
             // When AutoTg=true: use MENEX_2005 formula from cloud cover N

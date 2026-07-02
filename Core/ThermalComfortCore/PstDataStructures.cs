@@ -93,7 +93,7 @@ namespace ThermalComfort.Core
         public override string ToString()
         {
             if (Value == null) return "Null PST Human Set";
-            return $"PST Human [M={Value.MetRate:F0}W/m2, autoM={(Value.AutoMet ? "Y" : "N")}, v'={Value.WalkSpeed:F1}m/s, Icl={Value.CloValue:F2}clo, ac={Value.AlbedoClo:F0}%]";
+            return $"PST Human [M={Value.MetRate:F0}W/m2, autoM={(Value.AutoMet ? "Y" : "N")}, Vw={Value.WalkSpeed:F1}m/s, Icl={Value.CloValue:F2}clo, autoClo={(Value.AutoClo ? "Y" : "N")}, Alb={Value.AlbedoClo:F0}%]";
         }
     }
 }
