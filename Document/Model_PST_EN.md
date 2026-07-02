@@ -124,7 +124,7 @@ $$
 w = \begin{cases}
 1.0 & T_s > 36.5\,^\circ\text{C} \\
 0.001 & T_s < 22.0\,^\circ\text{C} \\
-\dfrac{1.031}{37.5 - T_s} - 0.065 & \text{otherwise}
+\frac{1.031}{37.5 - T_s} - 0.065 & \text{otherwise}
 \end{cases}$$
 
 Clamped to $[0.001, 1.0]$.
@@ -148,8 +148,8 @@ $$S = M + Q + C + E + \text{Res}$$
 **STI (Subjective Temperature Index):**
 
 $$\text{STI} = \begin{cases}
-\text{MRT} - \left\{\left[\dfrac{|S|^{0.75}}{\varepsilon_h \cdot \sigma} + 273^4\right]^{0.25} - 273\right\} & S < 0 \\
-\text{MRT} + \left\{\left[\dfrac{|S|^{0.75}}{\varepsilon_h \cdot \sigma} + 273^4\right]^{0.25} - 273\right\} & S \geq 0
+\text{MRT} - \left\{\left[\frac{|S|^{0.75}}{\varepsilon_h \cdot \sigma} + 273^4\right]^{0.25} - 273\right\} & S < 0 \\
+\text{MRT} + \left\{\left[\frac{|S|^{0.75}}{\varepsilon_h \cdot \sigma} + 273^4\right]^{0.25} - 273\right\} & S \geq 0
 \end{cases}$$
 
 **PhS ratio (physiological strain ratio):**
@@ -212,8 +212,8 @@ $$S_R = M + Q_R + C_R + E_R + \text{Res}$$
 ### 1.6 PST (Physiological Subjective Temperature)
 
 $$\text{PST} = \begin{cases}
-\text{iMRT} - \left\{\left[\dfrac{|S_R|^{0.75}}{\varepsilon_h \cdot \sigma} + 273^4\right]^{0.25} - 273\right\} & S_R < 0 \\
-\text{iMRT} + \left\{\left[\dfrac{|S_R|^{0.75}}{\varepsilon_h \cdot \sigma} + 273^4\right]^{0.25} - 273\right\} & S_R \geq 0
+\text{iMRT} - \left\{\left[\frac{|S_R|^{0.75}}{\varepsilon_h \cdot \sigma} + 273^4\right]^{0.25} - 273\right\} & S_R < 0 \\
+\text{iMRT} + \left\{\left[\frac{|S_R|^{0.75}}{\varepsilon_h \cdot \sigma} + 273^4\right]^{0.25} - 273\right\} & S_R \geq 0
 \end{cases}$$
 
 ### 1.7 Total Heat Loss
