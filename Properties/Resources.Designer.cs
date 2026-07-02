@@ -533,6 +533,26 @@ namespace NeosEnviSim.Properties {
         /// <summary>
         ///   查找 System.Drawing.Bitmap 类型的本地化资源。
         /// </summary>
+        internal static System.Drawing.Bitmap icon_PSThumanSet {
+            get {
+                object obj = ResourceManager.GetObject("icon_PSThumanSet", resourceCulture);
+                return ((System.Drawing.Bitmap)(obj));
+            }
+        }
+        
+        /// <summary>
+        ///   查找 System.Drawing.Bitmap 类型的本地化资源。
+        /// </summary>
+        internal static System.Drawing.Bitmap icon_PSTweatherSet {
+            get {
+                object obj = ResourceManager.GetObject("icon_PSTweatherSet", resourceCulture);
+                return ((System.Drawing.Bitmap)(obj));
+            }
+        }
+        
+        /// <summary>
+        ///   查找 System.Drawing.Bitmap 类型的本地化资源。
+        /// </summary>
         internal static System.Drawing.Bitmap icon_PVpanel {
             get {
                 object obj = ResourceManager.GetObject("icon_PVpanel", resourceCulture);
@@ -976,6 +996,16 @@ namespace NeosEnviSim.Properties {
         internal static System.Drawing.Bitmap iconPEDSIM {
             get {
                 object obj = ResourceManager.GetObject("iconPEDSIM", resourceCulture);
+                return ((System.Drawing.Bitmap)(obj));
+            }
+        }
+        
+        /// <summary>
+        ///   查找 System.Drawing.Bitmap 类型的本地化资源。
+        /// </summary>
+        internal static System.Drawing.Bitmap PSTsim {
+            get {
+                object obj = ResourceManager.GetObject("PSTsim", resourceCulture);
                 return ((System.Drawing.Bitmap)(obj));
             }
         }

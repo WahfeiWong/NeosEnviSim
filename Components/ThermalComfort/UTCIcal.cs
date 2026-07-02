@@ -1,4 +1,26 @@
-﻿using Grasshopper.Kernel;
+﻿// ============================================================================
+// REFERENCES
+// ============================================================================
+// [1] Bröde, P., Fiala, D., Błażejczyk, K., et al. (2012). Deriving the 
+//     operational procedure for the Universal Thermal Climate Index (UTCI).
+//     Int. J. Biometeorol., 56(3), 481–494.
+// [2] Bröde, P. (2009). UTCI – Version a 0.002 – October 2009.
+//     http://utci.org/public/UTCI%20Program%20Code/UTCI_a002.f90
+// [3] Fiala, D., Havenith, G., Bröde, P., et al. (2012). UTCI-Fiala multi-node
+//     model of human heat transfer and temperature regulation.
+//     Int. J. Biometeorol., 56(3), 429–441.
+// [4] Jendritzky, G., de Dear, R., & Havenith, G. (2012). UTCI—Why another
+//     thermal index? Int. J. Biometeorol., 56(3), 421–428.
+// [5] Błażejczyk, K., Jendritzky, G., Bröde, P., et al. (2013). An introduction
+//     to the Universal Thermal Climate Index (UTCI). Geographia Polonica,
+//     86(1), 5–10.
+// [6] COST Action 730. Towards a Universal Thermal Climate Index UTCI.
+//     http://www.utci.org
+// [7] Goff, J. A., & Gratch, S. (1946). Low-pressure properties of water...
+//     Trans. ASHVE, 52, 95–122. (for saturation vapour pressure)
+// ============================================================================
+
+using Grasshopper.Kernel;
 using NeosEnviSim.Properties;
 using System;
 
@@ -18,7 +40,7 @@ namespace ThermalComfort
         {
             pManager.AddNumberParameter("Ta", "Ta", "Air temperature (°C)", GH_ParamAccess.item);
             pManager.AddNumberParameter("Tmrt", "Tmrt", "Mean radiant temperature (°C)", GH_ParamAccess.item);
-            pManager.AddNumberParameter("va", "va", "Wind speed (m/s)", GH_ParamAccess.item);
+            pManager.AddNumberParameter("Va", "Va", "Wind speed (m/s)", GH_ParamAccess.item);
             pManager.AddNumberParameter("RH", "RH", "Relative humidity (%)", GH_ParamAccess.item);
         }
 
@@ -301,7 +323,7 @@ namespace ThermalComfort
             return UTCI;
         }
 
-        public override GH_Exposure Exposure => GH_Exposure.quarternary;
+        public override GH_Exposure Exposure => GH_Exposure.primary;
         protected override System.Drawing.Bitmap Icon => Resources.icon_UTCI;
         public override Guid ComponentGuid => new Guid("68A1634B-705A-4BB8-97F3-1CA3A3B4CB23");
     }

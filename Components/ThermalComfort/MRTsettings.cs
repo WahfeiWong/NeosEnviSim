@@ -144,7 +144,7 @@ namespace ThermalComfort
             DA.SetData(0, new GH_ObjectWrapper(config));
         }
 
-        public override GH_Exposure Exposure => GH_Exposure.secondary;
+        public override GH_Exposure Exposure => GH_Exposure.primary;
         protected override System.Drawing.Bitmap Icon => Resources.icon_MRTset;
         public override Guid ComponentGuid => new Guid("455D5C05-9F1A-4CFD-9DB4-82CFAE2EE3AA");
     }

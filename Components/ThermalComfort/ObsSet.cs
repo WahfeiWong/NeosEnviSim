@@ -211,7 +211,7 @@ namespace ThermalComfort
             return valid;
         }
 
-        public override GH_Exposure Exposure => GH_Exposure.secondary;
+        public override GH_Exposure Exposure => GH_Exposure.primary;
 
         public override Guid ComponentGuid => new Guid("FB2ACA0E-DC6E-4802-8E2A-2A5D99E9ECB7");
 
