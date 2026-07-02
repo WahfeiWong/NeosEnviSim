@@ -82,7 +82,7 @@ namespace ThermalComfort
                 "using the MENEX_2005 formula: Icl = 1.691 - 0.0436*t (clamped: " +
                 "t<-30C => 3.0 clo, t>25C => 0.6 clo), ignoring the CloValue input. " +
                 "If False, uses the user-specified CloValue as the absolute clo value.",
-                GH_ParamAccess.item, false);
+                GH_ParamAccess.item, true);
             pManager[3].Optional = true;
 
             // Clothing insulation (clo), default 0.8 (summer typical)
