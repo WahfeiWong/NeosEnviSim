@@ -316,7 +316,7 @@ t & N \geq 80\% \\
 
 ### 3.1 Description
 
-Configures human physiological parameters for PST simulation. Supports temperature-adaptive adjustment of clothing insulation.
+Configures human physiological parameters for PST simulation. Supports automatic metabolic rate calculation (from walking speed) and temperature-adaptive adjustment of clothing insulation.
 
 ### 3.2 Input Parameters
 
@@ -330,7 +330,7 @@ Configures human physiological parameters for PST simulation. Supports temperatu
 
 > **Note:** Mean skin temperature $T_s$ and skin wettedness $w$ are internal iterative variables of the MENEX_2005 model and are not exposed as inputs.
 
-### 3.3 Output Parameters
+### 3.4 Output Parameters
 
 | Index | Parameter | Description |
 |:---:|:---:|:---|
@@ -345,7 +345,9 @@ Configures human physiological parameters for PST simulation. Supports temperatu
 | Index | Parameter | Type | Description |
 |:---:|:---:|:---:|:---|
 | 0 | WeatherSet | Generic | Structured weather data from PST Weather Settings component |
-| 1 | HumanSet | Generic | Structured human parameter data from PST Human Settings component |
+| 1 | HumanSet | Generic | Structured human parameter data from PST Human Settings component (includes AutoMet metabolic rate auto-calculation) |
+
+> **Note:** When `AutoMet = false` in HumanSet and MetRate is inconsistent with WalkSpeed, the PST Simulator raises an additional warning. It is recommended to enable AutoMet to avoid physical contradictions between metabolic rate and walking speed.
 
 ### 4.2 Output Parameters
 

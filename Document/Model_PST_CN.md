@@ -316,21 +316,32 @@ t & N \geq 80\% \\
 
 ### 3.1 功能说明
 
-配置 PST 模拟所需的人体生理参数，支持服装热阻的温度自适应调整。
+配置 PST 模拟所需的人体生理参数，支持代谢率的自动计算（基于步行速度）以及服装热阻的温度自适应调整。
 
 ### 3.2 输入参数
 
 | 索引 | 参数 | 标识 | 单位 | 默认值 | 说明 |
 |:---:|:---:|:---:|:---:|:---:|:---|
-| 0 | MetRate | M | W/m² | 135 | 代谢产热率，默认对应步行 4 km/h（ISO 8996），范围 58–400 W/m² |
-| 1 | AutoClo | AutoClo | — | false | true 时按 MENEX_2005 公式自动调整服装热阻（忽略 CloValue 输入）；false 时使用 CloValue |
-| 2 | CloValue | Icl | clo | 0.8 | 服装热阻，夏季典型值；AutoClo = true 时被忽略 |
-| 3 | AlbedoClo | Alb | % | 30 | 服装表面太阳辐射反照率，典型夏季服装取值，范围 10–90% |
-| 4 | WalkSpeed | Vw | m/s | 1.1 | 人体相对于空气的运动速度，默认约 4 km/h 步行速度 |
+| 0 | AutoMet | AutoMet | — | true | true 时按 ISO 8996 简化公式由 WalkSpeed 自动计算 MetRate（忽略 MetRate 输入）；false 时使用 MetRate 并执行一致性检查 |
+| 1 | MetRate | M | W/m² | 135 | 代谢产热率；AutoMet = true 时被忽略；AutoMet = false 时作为绝对值使用 |
+| 2 | WalkSpeed | Vw | m/s | 1.1 | 人体相对于空气的运动速度；同时用于自动计算代谢率（AutoMet = true）；默认约 4 km/h |
+| 3 | AutoClo | AutoClo | — | false | true 时按 MENEX_2005 公式自动调整服装热阻（忽略 CloValue 输入）；false 时使用 CloValue |
+| 4 | CloValue | Icl | clo | 0.8 | 服装热阻，夏季典型值；AutoClo = true 时被忽略 |
+| 5 | AlbedoClo | Alb | % | 30 | 服装表面太阳辐射反照率，典型夏季服装取值，范围 10–90% |
 
 > **注意：** 平均皮肤温度 $T_s$ 和皮肤湿润度 $w$ 是 MENEX_2005 模型的内部迭代变量，不作为输入端暴露。
 
-### 3.3 输出参数
+### 3.3 代谢率自动计算（AutoMet）
+
+当 `AutoMet = true` 时，代谢率采用 ISO 8996 简化关系由步行速度自动计算：
+
+$$M = 58 + 70 \cdot v'$$
+
+其中 $v'$ 为步行速度 [m/s]，$M$ 为代谢产热率 [W/m²]。参考数据点：$v'=0$ m/s → $M=58$ W/m²（静息），$v'=1.1$ m/s → $M=135$ W/m²（步行 4 km/h）。计算结果钳制在 $[58, 400]$ W/m² 范围内。
+
+当 `AutoMet = false` 时，使用用户手动输入的 `MetRate`。此时组件执行一致性检查：若输入的 MetRate 与 WalkSpeed 根据上述公式的预期值偏差超过 30 W/m²，则抛出警告信息。此外，若 WalkSpeed > 2.0 m/s（快走或慢跑）但 MetRate < 160 W/m²，亦会触发警告。
+
+### 3.4 输出参数
 
 | 索引 | 参数 | 说明 |
 |:---:|:---:|:---|
@@ -345,7 +356,9 @@ t & N \geq 80\% \\
 | 索引 | 参数 | 类型 | 说明 |
 |:---:|:---:|:---:|:---|
 | 0 | WeatherSet | Generic | 结构化气象数据，来自 PST Weather Settings 组件 |
-| 1 | HumanSet | Generic | 结构化人体参数，来自 PST Human Settings 组件 |
+| 1 | HumanSet | Generic | 结构化人体参数，来自 PST Human Settings 组件（含 AutoMet 代谢率自动计算） |
+
+> **提示：** 当 HumanSet 中 `AutoMet = false` 且 MetRate 与 WalkSpeed 不一致时，PST Simulator 会额外抛出警告提示用户检查输入匹配性。建议启用 AutoMet 以避免代谢率与步行速度之间的物理矛盾。
 
 ### 4.2 输出参数
 

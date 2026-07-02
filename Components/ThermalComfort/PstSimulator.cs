@@ -107,6 +107,30 @@ namespace ThermalComfort
             PstWeatherSet w = ghWeather.Value;
             PstHumanSet h = ghHuman.Value;
 
+            // --- Input consistency validation ---
+            // Check MetRate vs WalkSpeed consistency when AutoMet is disabled
+            if (!h.AutoMet)
+            {
+                double expectedMet = 58.0 + 70.0 * h.WalkSpeed;
+                if (Math.Abs(h.MetRate - expectedMet) > 30.0)
+                {
+                    AddRuntimeMessage(GH_RuntimeMessageLevel.Warning,
+                        $"MetRate ({h.MetRate:F0} W/m2) and WalkSpeed ({h.WalkSpeed:F1} m/s) " +
+                        $"appear inconsistent (expected M ~{expectedMet:F0} W/m2). " +
+                        "Consider enabling AutoMet in PST Human Settings for automatic " +
+                        "metabolic rate calculation from walk speed.");
+                }
+            }
+            else
+            {
+                // Verify that auto-calculated MetRate is reasonable
+                double expectedMet = 58.0 + 70.0 * h.WalkSpeed;
+                AddRuntimeMessage(GH_RuntimeMessageLevel.Remark,
+                    $"AutoMet enabled: MetRate = {h.MetRate:F0} W/m2 " +
+                    $"(calculated from WalkSpeed {h.WalkSpeed:F1} m/s, " +
+                    $"ISO 8996: M = 58 + 70 * v).");
+            }
+
             // === STEP 1: INITIAL STEADY STATE ===
             // Calculate initial heat balance components at contact with ambient conditions
 

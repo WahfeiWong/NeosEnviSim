@@ -25,10 +25,11 @@ namespace ThermalComfort.Core
     public class PstHumanSet
     {
         public double MetRate { get; set; }      // Metabolic heat production (W/m2)
+        public bool AutoMet { get; set; }        // Auto-calculate metabolic rate from walk speed
+        public double WalkSpeed { get; set; }    // Walking speed (m/s)
         public bool AutoClo { get; set; }        // Auto-adjust clothing insulation by air temp
         public double CloValue { get; set; }     // Clothing insulation (clo)
         public double AlbedoClo { get; set; }    // Clothing albedo (%)
-        public double WalkSpeed { get; set; }    // Walking speed (m/s)
     }
 
     // Grasshopper wrapper types for custom data transmission between components.
@@ -81,16 +82,18 @@ namespace ThermalComfort.Core
             return new GH_PstHumanSet(new PstHumanSet
             {
                 MetRate = Value.MetRate,
+                AutoMet = Value.AutoMet,
+                WalkSpeed = Value.WalkSpeed,
+                AutoClo = Value.AutoClo,
                 CloValue = Value.CloValue,
-                AlbedoClo = Value.AlbedoClo,
-                WalkSpeed = Value.WalkSpeed
+                AlbedoClo = Value.AlbedoClo
             });
         }
 
         public override string ToString()
         {
             if (Value == null) return "Null PST Human Set";
-            return $"PST Human [M={Value.MetRate:F0}W/m2, Icl={Value.CloValue:F2}clo, ac={Value.AlbedoClo:F0}%, v'={Value.WalkSpeed:F1}m/s]";
+            return $"PST Human [M={Value.MetRate:F0}W/m2, autoM={(Value.AutoMet ? "Y" : "N")}, v'={Value.WalkSpeed:F1}m/s, Icl={Value.CloValue:F2}clo, ac={Value.AlbedoClo:F0}%]";
         }
     }
 }
