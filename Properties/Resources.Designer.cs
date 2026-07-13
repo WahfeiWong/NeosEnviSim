@@ -933,6 +933,36 @@ namespace NeosEnviSim.Properties {
         /// <summary>
         ///   查找 System.Drawing.Bitmap 类型的本地化资源。
         /// </summary>
+        internal static System.Drawing.Bitmap icon_UTCIhumanSet {
+            get {
+                object obj = ResourceManager.GetObject("icon_UTCIhumanSet", resourceCulture);
+                return ((System.Drawing.Bitmap)(obj));
+            }
+        }
+        
+        /// <summary>
+        ///   查找 System.Drawing.Bitmap 类型的本地化资源。
+        /// </summary>
+        internal static System.Drawing.Bitmap icon_UTCIsim {
+            get {
+                object obj = ResourceManager.GetObject("icon_UTCIsim", resourceCulture);
+                return ((System.Drawing.Bitmap)(obj));
+            }
+        }
+        
+        /// <summary>
+        ///   查找 System.Drawing.Bitmap 类型的本地化资源。
+        /// </summary>
+        internal static System.Drawing.Bitmap icon_UTCIweatherSet {
+            get {
+                object obj = ResourceManager.GetObject("icon_UTCIweatherSet", resourceCulture);
+                return ((System.Drawing.Bitmap)(obj));
+            }
+        }
+        
+        /// <summary>
+        ///   查找 System.Drawing.Bitmap 类型的本地化资源。
+        /// </summary>
         internal static System.Drawing.Bitmap icon_ViolinPlot {
             get {
                 object obj = ResourceManager.GetObject("icon_ViolinPlot", resourceCulture);

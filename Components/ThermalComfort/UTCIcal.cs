@@ -29,7 +29,7 @@ namespace ThermalComfort
     public class UTCIComponent : GH_Component
     {
         public UTCIComponent()
-          : base("UTCI", "UTCI",
+          : base("UTCI Calculator", "UTCI_Cal",
               "Calculates Universal Thermal Climate Index",
               "Neos",
               "Thermophysics")

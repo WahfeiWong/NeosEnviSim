@@ -341,7 +341,7 @@ namespace SoilThermophysics
             return sum / samples;
         }
 
-        public override GH_Exposure Exposure => GH_Exposure.senary;
+        public override GH_Exposure Exposure => GH_Exposure.secondary;
         protected override System.Drawing.Bitmap Icon => Resources.icon_soilTempModel;
         public override Guid ComponentGuid => new Guid("C5A9CF7E-89FC-4960-8B0E-170F43F50455");
     }
