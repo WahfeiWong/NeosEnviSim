@@ -353,6 +353,16 @@ namespace NeosEnviSim.Properties {
         /// <summary>
         ///   查找 System.Drawing.Bitmap 类型的本地化资源。
         /// </summary>
+        internal static System.Drawing.Bitmap icon_HumanSimBase {
+            get {
+                object obj = ResourceManager.GetObject("icon_HumanSimBase", resourceCulture);
+                return ((System.Drawing.Bitmap)(obj));
+            }
+        }
+        
+        /// <summary>
+        ///   查找 System.Drawing.Bitmap 类型的本地化资源。
+        /// </summary>
         internal static System.Drawing.Bitmap icon_imageProcessor {
             get {
                 object obj = ResourceManager.GetObject("icon_imageProcessor", resourceCulture);

@@ -9,7 +9,7 @@ using ThermalComfort.Core;
 namespace ThermalComfort
 {
     /// <summary>
-    /// UTCI Simulator - Multi-node human thermoregulation model with iterative heat balance solving.
+    /// Human Thermoregulation Simulator - Multi-node human thermoregulation model with iterative heat balance solving.
     /// Implements the Fiala multi-segment physiology model (Fiala 1998 PhD thesis;
     /// Fiala et al. 2001/2012) to compute equivalent temperature and DTS.
     ///
@@ -18,8 +18,9 @@ namespace ThermalComfort
     /// - Fiala, D. et al. (2012). Int J Biometeorol, 56, 419-431.
     /// - Havenith, G. et al. (2012). Int J Biometeorol, 56, 461-470.
     /// - Broede, P. et al. (2012). Int J Biometeorol, 56, 475-482.
+    /// - Fiala, D., Lomas, K. J., & Stohrer, M. (2003). First principles modelling of thermal sensation responses in steady and transient conditions. International Journal of Biometeorology, 47(4), 179-191.
     /// </summary>
-    public class UtciSimulator : GH_Component
+    public class HumanThermoregulationSimulator : GH_Component
     {
         private const double SIGMA = 5.67e-8;
         private const double LAMBDA_H2O = 2.425e6;
@@ -55,10 +56,10 @@ namespace ThermalComfort
 
         private readonly SegData[] SD;
 
-        public UtciSimulator()
+        public HumanThermoregulationSimulator()
             : base(
-                "UTCI Simulator",
-                "UTCI_Sim",
+                "Human Thermoregulation Simulator", 
+                "HTsim",
                 "Multi-node human thermoregulation model (Fiala 1998/2001) solving the "
                     + "bioheat equation iteratively. Computes physiological equivalent "
                     + "temperature via binary search in reference conditions (NOT the "
@@ -379,19 +380,29 @@ namespace ThermalComfort
         protected override void RegisterInputParams(GH_Component.GH_InputParamManager pManager)
         {
             pManager.AddGenericParameter(
-                "WeatherSet",
-                "WS",
-                "Structured weather data from UTCI Weather Settings (list for batch)",
+                "Human Thermal Environment",
+                "HTE",
+                "Structured weather data from Human Thermal Environment (list for batch)",
                 GH_ParamAccess.list
             );
             pManager.AddGenericParameter(
-                "HumanSet",
-                "HS",
-                "Structured human/activity data from UTCI Human Settings (list for batch). "
+                "Human Physiology",
+                "HP",
+                "Structured human/activity data from Human Physiology (list for batch). "
                     + "If single item, it is applied to all weather items.",
                 GH_ParamAccess.list
             );
             
+            pManager.AddGenericParameter(
+                "SimBaseSet",
+                "SBS",
+                "Simulation base settings (optional). From Simulation Base Settings component. "
+                    + "Defines reference environment, solver control, and physiology coefficients. "
+                    + "If not connected, uses PET defaults (M=80, v=0.1, RH=50%, Icl=0.5).",
+                GH_ParamAccess.item
+            );
+            pManager[2].Optional = true;
+
             pManager.AddBooleanParameter(
                 "Run",
                 "Run",
@@ -399,7 +410,7 @@ namespace ThermalComfort
                 GH_ParamAccess.item,
                 false
             );
-            pManager[2].Optional = true;
+            pManager[3].Optional = true;
         }
 
         protected override void RegisterOutputParams(GH_Component.GH_OutputParamManager pManager)
@@ -407,15 +418,15 @@ namespace ThermalComfort
             pManager.AddNumberParameter(
                 "EquivTemp",
                 "EqT",
-                "Physiological equivalent temperature [deg C] computed by Fiala "
-                    + "multi-node model via binary search in reference conditions. "
-                    + "NOT the standard UTCI polynomial. Comfort range: ~9-26.",
+                "Physiological equivalent temperature [deg C] from Fiala 12-segment "
+                    + "multi-node model (S-matching binary search in reference conditions).",
                 GH_ParamAccess.list
             );
             pManager.AddNumberParameter(
                 "DTS",
                 "DTS",
-                "Dynamic Thermal Sensation [-3 to +3]. -3=cold, 0=neutral, +3=hot.",
+                "Dynamic Thermal Sensation [-3 to +3] from Fiala (1998/2003) model. "
+                    + "-3=cold, 0=neutral, +3=hot. Based on physiological state (Tsk, Tcore, wsk).",
                 GH_ParamAccess.list
             );
             pManager.AddNumberParameter(
@@ -514,21 +525,28 @@ namespace ThermalComfort
 
         // =====================================================================
         // Helper: UTCI Clothing Model (Havenith et al., 2012)
+        // Continuous piecewise-linear interpolation eliminating step
+        // discontinuities. Anchor points from Havenith (2012):
+        //   (-5, 1.30), (5, 1.05), (15, 0.80), (26, 0.55), (32, 0.40), (36, 0.30)
+        // Ref: Havenith, G. et al. (2012). Int J Biometeorol, 56, 461-470.
         // =====================================================================
         private void UTCI_ClothingModel(double t_a, out double icl, out double f_cl, out double i_m)
         {
-            if (t_a < -5.0)
-                icl = 1.30; // Heavy winter clothing
-            else if (t_a < 5.0)
-                icl = 1.05; // Winter clothing
-            else if (t_a < 15.0)
-                icl = 0.80; // Light clothing + jacket
-            else if (t_a < 26.0)
-                icl = 0.55; // Light clothing
-            else if (t_a < 32.0)
-                icl = 0.40; // Summer clothing
+            // Piecewise-linear: no hard thresholds, smooth transitions
+            if (t_a <= -5.0)
+                icl = 1.30;
+            else if (t_a <= 5.0)
+                icl = 1.30 + (1.05 - 1.30) * (t_a + 5.0) / 10.0;  // -5→5
+            else if (t_a <= 15.0)
+                icl = 1.05 + (0.80 - 1.05) * (t_a - 5.0) / 10.0;  // 5→15
+            else if (t_a <= 26.0)
+                icl = 0.80 + (0.55 - 0.80) * (t_a - 15.0) / 11.0; // 15→26
+            else if (t_a <= 32.0)
+                icl = 0.55 + (0.40 - 0.55) * (t_a - 26.0) / 6.0;  // 26→32
+            else if (t_a <= 36.0)
+                icl = 0.40 + (0.30 - 0.40) * (t_a - 32.0) / 4.0;  // 32→36
             else
-                icl = 0.30; // Minimal clothing (hot)
+                icl = 0.30; // Saturated at 36°C+
 
             f_cl = 1.0 + 0.31 * icl;
             i_m = 0.38;
@@ -549,86 +567,102 @@ namespace ThermalComfort
         // Ref: Hoppe, P. (1999). The physiological equivalent temperature.
         //   Int J Biometeorol, 43, 71-75.
         // =====================================================================
-        private UtciResultSet Simulate(UtciWeatherSet w, UtciHumanSet h)
+        private UtciResultSet Simulate(UtciWeatherSet w, UtciHumanSet h, SimulationSettings ss)
         {
             // 1. Run ACTUAL environment with user's activity level
-            UtciResultSet actual = CoreSolve(w, h);
-            double dts_actual = ComputeDTS(
+            UtciResultSet actual = CoreSolve(w, h, ss);
+            // Compute DTS and internal stress index S.
+            // S is used for binary search (linear, no saturation).
+            double dts_actual;
+            double S_actual = ComputeDTS(
                 actual.MeanSkinTemp,
                 actual.CoreTemp,
                 actual.SkinWettedness,
-                h.MetRate
+                h.MetRate,
+                0.0,  // dTsk/dt = 0 at steady-state convergence
+                out dts_actual
             );
 
-            // 2. Build PET reference human: standing (M=80, v_walk=0), fixed clothing
+            // 2. Build UTCI reference human (Broede et al., 2012)
+            // Ref: Broede et al. (2012). Int J Biometeorol, 56, 475-482.
+            // UTCI reference: M=135 W/m², Icl=0.5 clo (fixed), va=0.5 m/s.
+            // CRITICAL: Reference clothing must be FIXED (not adaptive) to ensure
+            // DTS(T_ref) is monotonic for binary search convergence.
             var h_ref = new UtciHumanSet
             {
-                MetRate = 80.0,
+                MetRate = ss.RefMetRate,
                 WalkSpeed = 0.0,
                 BodyWeight = h.BodyWeight,
                 BodyHeight = h.BodyHeight,
-                AutoClo = false,
-                CloValue = 0.5,
+                AutoClo = false,         // FIXED clothing for reference
+                CloValue = ss.RefIcl,    // Fixed Icl (default 0.5 clo)
                 AutoMet = false,
                 Posture = 0,
                 Age = h.Age,
                 Sex = h.Sex
             };
 
-            // 3. Binary search for equivalent temperature
-            double tr_low = -50.0,
-                tr_high = 50.0;
+            // 3. Compute Equivalent Temperature (EqT) via Fiala model
+            // Binary search matching internal stress index S (linear, avoids tanh
+            // saturation). EqT always comes from the Fiala physiological model.
+            // A separate UTCI field (Broede 2012 polynomial) is provided for
+            // comparison with the standard meteorological UTCI index.
+            // Ref: Fiala (1998) Eq. 5.21; Broede et al. (2012).
+            double tr_low = -50.0, tr_high = 50.0;
             double best_tr = w.AirTemp;
             double best_diff = double.MaxValue;
 
-            for (int iter = 0; iter < 20; iter++)
+            for (int iter = 0; iter < ss.EqTSearchIter; iter++)
             {
                 double tr = (tr_low + tr_high) / 2.0;
-
                 double es_ref = SatVP(tr);
-                double vp_ref_hPa = es_ref * 0.5;
+                double vp_ref_hPa = es_ref * ss.RefRH / 100.0;
 
                 var w_ref = new UtciWeatherSet
                 {
                     AirTemp = tr,
                     MRT = tr,
-                    WindSpeed = 0.1,
+                    WindSpeed = ss.RefWindSpeed,
                     VapourPressure = vp_ref_hPa,
                     AtmosphericPressure = 1013.25
                 };
 
-                UtciResultSet refr = CoreSolve(w_ref, h_ref);
+                UtciResultSet refr = CoreSolve(w_ref, h_ref, ss);
 
                 double dts_ref;
                 if (double.IsNaN(refr.MeanSkinTemp) || double.IsNaN(refr.CoreTemp))
                 {
-                    if (dts_actual > 0)
+                    if (S_actual > 0)
                         tr_high = tr;
                     else
                         tr_low = tr;
                     continue;
                 }
 
-                dts_ref = ComputeDTS(
+                // Match S (linear stress index) — avoids tanh saturation
+                double S_ref = ComputeDTS(
                     refr.MeanSkinTemp,
                     refr.CoreTemp,
                     refr.SkinWettedness,
-                    h_ref.MetRate
+                    h_ref.MetRate,
+                    0.0,
+                    out dts_ref
                 );
 
-                double diff = Math.Abs(dts_ref - dts_actual);
+                double diff = Math.Abs(S_ref - S_actual);
+                if (S_ref < S_actual)
+                    tr_low = tr;
+                else
+                    tr_high = tr;
+
                 if (diff < best_diff)
                 {
                     best_diff = diff;
                     best_tr = tr;
                 }
-
-                if (dts_ref < dts_actual)
-                    tr_low = tr;
-                else
-                    tr_high = tr;
             }
 
+            // EqT from Fiala model (physiological equivalent temperature)
             actual.EquivalentTemperature = best_tr;
             actual.DTS = dts_actual;
             return actual;
@@ -639,7 +673,7 @@ namespace ThermalComfort
         // Implements Fiala (1998/2001) 12-segment, 5-layer bioheat model.
         // Solved via TDMA with iterative update of active systems and blood pool.
         // =====================================================================
-        private UtciResultSet CoreSolve(UtciWeatherSet w, UtciHumanSet h)
+        private UtciResultSet CoreSolve(UtciWeatherSet w, UtciHumanSet h, SimulationSettings ss)
         {
             int NS = SD.Length;
             int NL = 5;
@@ -666,10 +700,29 @@ namespace ThermalComfort
             double eta = met > 1.6 ? Math.Min(0.2, Math.Max(0, 0.39 * met - 0.60)) : 0.0;
             double Hwk = (met - 0.8) * 58.2 * Ad * (1.0 - eta);
 
+            // Respiratory heat loss — Fiala (1998) §3.4.5
+            // Ref: Fiala (1998), Eq. 3.47-3.48
+            //   C_res = 0.0014 * M * (34 - T_a)  [W/m²] — sensible
+            //   E_res = 0.0023 * M * (44 - p_a_mmHg)  [W/m²] — latent
+            //   where p_a_mmHg = p_a_hPa * 0.75006 (1 hPa = 0.75006 mmHg)
+            //   The constant 44 corresponds to saturation vapour pressure
+            //   of expired air at ~35°C (~44 mmHg ≈ 58.7 hPa).
+            double p_a_hPa = w.VapourPressure; // hPa
+            double p_a_mmHg = p_a_hPa * 0.75006; // convert hPa → mmHg
+            double C_res = 0.0014 * h.MetRate * (34.0 - w.AirTemp);
+            double E_res = 0.0023 * h.MetRate * (44.0 - p_a_mmHg);
+            double Q_res = (C_res + E_res) * Ad; // [W] total respiratory heat loss
+
             // Hwk uniform distribution: precompute total body volume
             double V_total = 0.0;
             for (int s = 0; s < NS; s++)
                 V_total += SD[s].V_seg;
+            // Respiratory heat loss subtracted from workload (activity heat) only,
+            // NOT from basal metabolism. This prevents negative qm in layers
+            // with zero basal metabolic rate (e.g., head muscle layer).
+            // Ref: Fiala (1998) §3.4.5
+            Hwk -= Q_res;
+            Hwk = Math.Max(0.0, Hwk);
             double Hwk_per_vol = V_total > 1e-12 ? Hwk / V_total : 0.0;
 
             // Clothing from HumanSet (AutoClo or manual CloValue)
@@ -691,9 +744,17 @@ namespace ThermalComfort
             // Ambient
             double ta = w.AirTemp;
             double tmrt = w.MRT;
-            // Effective air speed: wind + walking (Pythagorean coupling)
+            // Effective air speed: wind + walking
             // Ref: ISO 7933 (2004) - body movement increases relative air speed.
-            double va = Math.Sqrt(w.WindSpeed * w.WindSpeed + h.WalkSpeed * h.WalkSpeed);
+            // For walk speed > 1.2 m/s, ISO 7933 recommends linear correction
+            // instead of Pythagorean to avoid overestimation:
+            //   va = v_wind + 0.4 * v_walk  (when v_walk > 1.2)
+            //   va = sqrt(v_wind^2 + v_walk^2) (when v_walk <= 1.2)
+            double va;
+            if (h.WalkSpeed > 1.2)
+                va = w.WindSpeed + 0.4 * h.WalkSpeed;
+            else
+                va = Math.Sqrt(w.WindSpeed * w.WindSpeed + h.WalkSpeed * h.WalkSpeed);
             double pa = w.VapourPressure * 100.0;
 
             // Posture factor: affects effective radiant body surface area
@@ -703,12 +764,12 @@ namespace ThermalComfort
 
             // Age correction: thermoregulatory response attenuation
             // Ref: Fiala et al. (2012), Int J Biometeorol 56:419-431
-            // Seniors (>65): reduced vasoconstriction, vasodilation, sweating
-            double age_factor = h.Age > 65.0 ? 0.75 : 1.0;
+            // Seniors (>65): thermoregulatory response attenuated by AgeAttenuation factor
+            double age_factor = h.Age > 65.0 ? ss.AgeAttenuation : 1.0;
 
             // Sex correction: basal metabolic rate adjustment
             // Ref: ISO 8996 Annex B; female basal M ~8-10% lower than male
-            double sex_factor = h.Sex == 1 ? 0.90 : 1.0;
+            double sex_factor = h.Sex == 1 ? ss.SexMetFactor : 1.0;
 
             // Atmospheric pressure correction (altitude effect)
             // Affects air density (convection) and boiling point (evaporation)
@@ -731,8 +792,8 @@ namespace ThermalComfort
                 Dl = 0,
                 Sw = 0;
 
-            const int MAX_ITER = 200;
-            const double TOL = 0.005;
+            int MAX_ITER = ss.MaxIter;
+            double TOL = ss.ResidTol;
             int iter = 0;
             double resid = 1.0;
 
@@ -751,7 +812,11 @@ namespace ThermalComfort
                 }
                 Tskm /= Atot;
                 double Thy = T[0][0];
-                double dTsk = iter > 1 ? (Tskm - Tskm_prev) * 60.0 : 0.0;
+                // dTsk/dt = 0 in steady-state iteration. The quantity (Tskm - Tskm_prev)
+                // is a numerical convergence residual, not a physical time derivative.
+                // Using it as dTsk/dt injects pseudo-dynamic signals that destabilise
+                // the active system and cause EqT jumps. Ref: Fiala (1998) §4.4.
+                double dTsk = 0.0;
 
                 // 2. Active system: non-linear control equations
                 // Ref: Fiala, D., Lomas, K.J. & Stohrer, M. (2001). Computer prediction
@@ -761,25 +826,37 @@ namespace ThermalComfort
                     Ehy = Thy - Thy0;
 
                 // --- Shivering [W] ---
-                double b_sh_sk = 10.0 * (Math.Tanh(0.48 * Esk + 3.62) - 1.0);
-                Sh = b_sh_sk * Esk + (-27.9) * Ehy + 1.7 * Esk * dTsk + (-28.6);
+                // Ref: Fiala (1998) Eq. (4.19)
+                //   Sh = 10*[tanh(0.51*dTsk+4.19)-1]*dTsk - 27.5*dThy 
+                //        + 1.90*dTsk*dTsk/dt - 28.5
+                double b_sh_sk = 10.0 * (Math.Tanh(0.51 * Esk + 4.19) - 1.0);
+                Sh = b_sh_sk * Esk + (-27.5) * Ehy + 1.90 * Esk * dTsk + (-28.5);
                 Sh = Math.Max(0.0, Math.Min(350.0, Sh));
 
                 // --- Vasoconstriction [-] ---
-                double b_cs_sk = 35.0 * (Math.Tanh(0.34 * Esk + 1.07) - 1.0);
-                double cs_dyn = (Esk < 0 && dTsk < 0) ? 3.9 * Esk * dTsk : 0.0;
-                Cs = b_cs_sk * Esk + cs_dyn;
+                // Ref: Fiala (1998) Eq. (4.24)
+                //   Cs = 35*[tanh(0.29*dTsk+1.11)-1]*dTsk - 7.7*dThy
+                //        + 3.0*dTsk*dTsk/dt(-)
+                double b_cs_sk = 35.0 * (Math.Tanh(0.29 * Esk + 1.11) - 1.0);
+                double cs_dyn = (Esk < 0 && dTsk < 0) ? 3.0 * Esk * dTsk : 0.0;
+                Cs = b_cs_sk * Esk + (-7.7) * Ehy + cs_dyn;
                 Cs = Math.Max(0.0, Cs);
 
                 // --- Vasodilation [W/K] ---
-                double b_dl_sk = (Esk > 0) ? 21.0 * (Math.Tanh(0.79 * Esk - 0.70) + 1.0) : 0.0;
-                double b_dl_hy = 32.0 * (Math.Tanh(3.29 * Ehy - 1.46) + 1.0);
+                // Ref: Fiala (1998) Eq. (4.32)
+                //   Dl = 16*[tanh(1.92*dTsk-2.53)+1]*dTsk(max(0))
+                //      + 30*[tanh(3.51*dThy-1.48)+1]*dThy
+                double b_dl_sk = (Esk > 0) ? 16.0 * (Math.Tanh(1.92 * Esk - 2.53) + 1.0) : 0.0;
+                double b_dl_hy = 30.0 * (Math.Tanh(3.51 * Ehy - 1.48) + 1.0);
                 Dl = b_dl_sk * Esk + b_dl_hy * Ehy;
                 Dl = Math.Max(0.0, Dl);
 
                 // --- Sweating [g/min] ---
-                double b_sw_sk = 0.8 * Math.Tanh(0.59 * Esk - 0.19) + 1.2;
-                double b_sw_hy = 5.7 * Math.Tanh(1.98 * Ehy - 1.03) + 6.3;
+                // Ref: Fiala (1998) Eq. (4.28)
+                //   Sw = [0.65*tanh(0.82*dTsk-0.47)+1.15]*dTsk
+                //      + [5.6*tanh(3.14*dThy-1.83)+6.4]*dThy
+                double b_sw_sk = 0.65 * Math.Tanh(0.82 * Esk - 0.47) + 1.15;
+                double b_sw_hy = 5.6 * Math.Tanh(3.14 * Ehy - 1.83) + 6.4;
                 Sw = b_sw_sk * Esk + b_sw_hy * Ehy;
                 Sw = Math.Max(0.0, Math.Min(30.0, Sw));
 
@@ -830,6 +907,7 @@ namespace ThermalComfort
                         double qm = qm0 * sex_factor * Math.Pow(2.0, (T[s][l] - 37.0) / 10.0);
 
                         // Workload: uniform distribution to ALL tissue layers [W/m3]
+                        // (respiratory heat loss already subtracted from Hwk above)
                         // Ref: Fiala (1998) - activity heat distributed by tissue volume
                         qm += Hwk_per_vol;
 
@@ -848,6 +926,9 @@ namespace ThermalComfort
                         }
 
                         // Blood perfusion (modulated in inner skin layer l=3)
+                        // Ref: Fiala (1998) Eq. (4.8)
+                        //   beta'_i = beta'_0,i * [1 + a_dl,i * Dl * exp(-Dl/50)]
+                        //             / [1 + a_cs,i * Cs] * 2^((Tsk,i-Tsk0,i)/10)
                         double beta = BLOOD_RHO * BLOOD_CP * wbl0;
                         if (l == 3)
                         {
@@ -858,11 +939,10 @@ namespace ThermalComfort
                                     * Math.PI
                                     * (Math.Pow(rad[l + 1], 3) - Math.Pow(rad[l], 3))
                                 : Math.PI * (Math.Pow(rad[l + 1], 2) - Math.Pow(rad[l], 2)) * L_eff;
-                            beta =
-                                vol_skin > 1e-12
-                                    ? (b0 + Dl * seg.Ddl / vol_skin)
-                                        * Math.Exp(-Cs * seg.Dcs / 50.0)
-                                    : b0 * Math.Exp(-Cs * seg.Dcs / 50.0);
+                            // Fiala 1998 Eq. (4.8): corrected skin blood flow equation
+                            double beta_num = 1.0 + seg.Ddl * Dl * Math.Exp(-Dl / 50.0);
+                            double beta_den = 1.0 + seg.Dcs * Cs;
+                            beta = b0 * (beta_num / beta_den);
                             beta *= Math.Pow(2.0, (T[s][l] - 34.4) / 10.0);
                         }
 
@@ -941,7 +1021,7 @@ namespace ThermalComfort
                     // Ref: Gagge et al. (1971); Fiala (1998). Even without sweating,
                     // skin has ~6% baseline wetness from transepidermal water loss.
                     // This ensures RH affects Qev even when Sw = 0.
-                    double w_total = 0.06 + 0.94 * w_sw;
+                    double w_total = ss.InsensibleDiff + (1.0 - ss.InsensibleDiff) * w_sw;
 
                     Qev[s] = w_total * Emax;
 
@@ -997,11 +1077,11 @@ namespace ThermalComfort
                                     * (Math.Pow(rad[l + 1], 3) - Math.Pow(rad[l], 3))
                                 : Math.PI * (Math.Pow(rad[l + 1], 2) - Math.Pow(rad[l], 2)) * L_eff;
                             double b0 = BLOOD_RHO * BLOOD_CP * seg.Wbl[l];
-                            double beta_skin =
-                                vol_skin > 1e-12
-                                    ? (b0 + Dl * seg.Ddl / vol_skin)
-                                        * Math.Exp(-Cs * seg.Dcs / 50.0)
-                                    : b0 * Math.Exp(-Cs * seg.Dcs / 50.0);
+                            // Fiala 1998 Eq. (4.8): corrected skin blood flow equation
+                            double beta_num = 1.0 + seg.Ddl * Dl * Math.Exp(-Dl / 50.0);
+                            double beta_den = 1.0 + seg.Dcs * Cs;
+                            double beta_skin = b0 * (beta_num / beta_den);
+                            beta_skin *= Math.Pow(2.0, (T[s][l] - 34.4) / 10.0);
                             wbl = beta_skin / (BLOOD_RHO * BLOOD_CP);
                         }
 
@@ -1014,7 +1094,7 @@ namespace ThermalComfort
                 if (sw > 0)
                 {
                     double Tbn = sb / sw;
-                    const double alpha = 0.7;
+                    double alpha = ss.BlpRelax;
                     double Tblp_new = alpha * Tbn + (1.0 - alpha) * Tblp;
                     double r = Math.Abs(Tblp_new - Tblp);
                     if (r > resid)
@@ -1061,10 +1141,11 @@ namespace ThermalComfort
                         * (Math.Pow(rad[l_skin + 1], 3) - Math.Pow(rad[l_skin], 3))
                     : Math.PI * (Math.Pow(rad[l_skin + 1], 2) - Math.Pow(rad[l_skin], 2)) * L_eff;
                 double b0 = BLOOD_RHO * BLOOD_CP * seg.Wbl[l_skin];
-                double beta_skin =
-                    vol_skin > 1e-12
-                        ? (b0 + Dl * seg.Ddl / vol_skin) * Math.Exp(-Cs * seg.Dcs / 50.0)
-                        : b0 * Math.Exp(-Cs * seg.Dcs / 50.0);
+                // Fiala 1998 Eq. (4.8): corrected skin blood flow equation
+                double beta_num = 1.0 + seg.Ddl * Dl * Math.Exp(-Dl / 50.0);
+                double beta_den = 1.0 + seg.Dcs * Cs;
+                double beta_skin = b0 * (beta_num / beta_den);
+                beta_skin *= Math.Pow(2.0, (T[s][l_skin] - 34.4) / 10.0);
                 double wbl = beta_skin / (BLOOD_RHO * BLOOD_CP);
                 SBF_total += wbl * vol_skin * 1000.0 * 60.0; // [L/min]
             }
@@ -1084,8 +1165,10 @@ namespace ThermalComfort
                 wettedness += Qev[s];
                 Emax_total += Emax_w;
             }
+            // w = Eactual / Emax (both already include segment area SD[s].A,
+            // so the ratio is a proper area-weighted average. No further
+            // normalisation by A_total is needed.)
             wettedness = Emax_total > 1e-12 ? wettedness / Emax_total : 0;
-            wettedness /= A_total;
             wettedness = Math.Max(0.0, Math.Min(1.0, wettedness));
 
             // Heat balance components
@@ -1112,29 +1195,69 @@ namespace ThermalComfort
         }
 
         // =====================================================================
-        // DTS: Dynamic Thermal Sensation (non-linear, monotonic [-3, +3])
+        // DTS (Dynamic Thermal Sensation) Model - 修正版
         // Ref: Fiala (2012) - combined strain metric through tanh
+        //      Fiala, D., Lomas, K. J., & Stohrer, M. (2003). First principles modelling of thermal sensation responses in steady and transient conditions. International Journal of Biometeorology, 47(4), 179-191.
         // =====================================================================
-        private double ComputeDTS(double Tsk, double Tcore, double wsk, double M)
+        // =====================================================================
+        // DTS (Dynamic Thermal Sensation) Model - 修正版
+        // =====================================================================
+        /// <summary>
+        /// Compute DTS (Dynamic Thermal Sensation) and the internal stress index S.
+        /// Returns DTS via out parameter; function return value is S (linear, un-saturated).
+        /// Binary search for EqT uses S instead of DTS to avoid tanh saturation.
+        /// Ref: Fiala (1998) Eq. (5.21-5.25); Fiala (2003).
+        /// </summary>
+        private double ComputeDTS(double Tsk, double Tcore, double wsk, double M, double dTskdt, out double DTS)
         {
-            // Skin temperature contribution (quadratic near neutral, linear far)
-            double err_sk = Tsk - 34.0;
-            double f_sk = 0.5 * err_sk + 0.02 * err_sk * Math.Abs(err_sk);
+            // Setpoints with metabolic rate correction
+            // Fiala 1998 base: Tsk0=34.4°C at M=58.2 W/m²
+            // Fiala 2003 correction: dTsk0/dM = -0.028 K/(W/m²)
+            double Tsk0 = 34.4 - 0.028 * (M - 58.2);
+            double Thy0 = 37.0 + 0.0015 * (M - 58.2);
 
-            // Core temperature contribution
-            double f_core = 0.3 * (Tcore - 37.0);
+            double dTsk = Tsk - Tsk0;   // Skin temperature error [K]
+            double dThy = Tcore - Thy0; // Core (hypothalamus) temperature error [K]
 
-            // Skin wetness contribution (warm discomfort)
-            // Threshold at wsk=0.06 ensures insensible diffusion (baseline
-            // 6% wetness) contributes to DTS even without active sweating.
-            double f_wet = 1.5 * Math.Max(0, wsk - 0.06);
+            // 1. fsk: skin temperature contribution (Eq. 5.4)
+            double b1 = dTsk > 0 ? 1.026 : 0.298;
+            double fsk = b1 * dTsk;
 
-            // Exercise effect (reduces warm sensation)
-            double f_ex = M > 100 ? -0.1 * (M - 100) / 100.0 : 0.0;
+            // 2. phi: core temperature contribution via exponential interaction (Eq. 5.13)
+            double phi = 0.0;
+            if (dThy > 0 && dTsk < 5.0)
+            {
+                double g_hy = 0.376 * Math.Exp(-0.565 * dThy) - 1.0;   // Eq. 5.10
+                double g_sk = 1.521 * Math.Exp(-7.634 * dTsk) - 1.0;   // Eq. 5.12
+                phi = g_hy * g_sk;
+            }
 
-            // Combined signal through tanh [-3, +3]
-            double S = f_sk + f_core + f_wet + f_ex;
-            return 3.0 * Math.Tanh(S);
+            // 3. tau_neg: negative dTsk/dt dynamic effect (Eq. 5.15)
+            double tau_neg = 0.0;
+            if (dTskdt < 0)
+                tau_neg = 0.114 * dTskdt * phi;
+
+            // 4. tau_pos: positive dTsk/dt memory function (Eq. 5.18)
+            // For steady-state simulations, dTsk/dt -> 0, so tau_pos ≈ 0.
+            double tau_pos = 0.0;
+
+            // 5. f_core: direct core temperature contribution
+            double f_core = 0.3 * dThy;
+
+            // 6. f_ex: exercise effect (thermal tolerance shift)
+            double f_ex = M > 100.0 ? -0.035 : 0.0;
+
+            // 7. f_wet: skin wettedness contribution
+            double f_wet = 1.5 * Math.Max(0.0, wsk - 0.06);
+
+            // 8. Internal stress index S (linear, un-saturated)
+            double S = fsk + phi + tau_neg + tau_pos + f_core + f_ex + f_wet;
+
+            // DTS via tanh mapping to [-3, +3] (Eq. 5.21)
+            DTS = 3.0 * Math.Tanh(S);
+
+            // Return S for binary search (avoids tanh saturation)
+            return S;
         }
 
         // =====================================================================
@@ -1145,13 +1268,36 @@ namespace ThermalComfort
             // Read inputs as lists
             var ghWSList = new List<GH_UtciWeatherSet>();
             var ghHSList = new List<GH_UtciHumanSet>();
+            // --- Read SimBaseSet (optional, index 2) ---
+            SimulationSettings ss = null;
+            GH_SimulationSettings ghSS = null;
+            if (DA.GetData(2, ref ghSS) && ghSS != null)
+            {
+                ss = ghSS.Value;
+            }
+            // Use PET defaults if not connected
+            if (ss == null)
+            {
+                ss = new SimulationSettings
+                {
+                    // UTCI reference conditions (Fiala et al. 2012)
+                    // Ref: Broede et al. (2012). Int J Biometeorol, 56, 475-482.
+                    RefMetRate = 135.0,     // UTCI: walking 4 km/h (~1.1 m/s)
+                    RefWindSpeed = 0.5,     // UTCI: 0.5 m/s at 10m height
+                    RefRH = 50.0,           // Standard reference RH
+                    RefIcl = 0.5,           // Fallback (AutoClo=true uses adaptive model)
+                    MaxIter = 200, ResidTol = 0.005, BlpRelax = 0.7, EqTSearchIter = 20,
+                    InsensibleDiff = 0.06, AgeAttenuation = 0.75, SexMetFactor = 0.90
+                };
+            }
+
             bool run = false;
 
             if (!DA.GetDataList(0, ghWSList))
                 return;
             if (!DA.GetDataList(1, ghHSList))
                 return;
-            DA.GetData(2, ref run);
+            DA.GetData(3, ref run);
 
             if (!run)
                 return;
@@ -1212,7 +1358,7 @@ namespace ThermalComfort
                     {
                         UtciWeatherSet w = ghWSList[i].Value;
                         UtciHumanSet h = ghHSList[i].Value ?? new UtciHumanSet();
-                        UtciResultSet result = Simulate(w, h);
+                        UtciResultSet result = Simulate(w, h, ss);
 
                         eqtList[i] = result.EquivalentTemperature;
                         dtsList[i] = result.DTS;
@@ -1236,18 +1382,18 @@ namespace ThermalComfort
             int convCount = convList.Count(c => c);
             AddRuntimeMessage(
                 GH_RuntimeMessageLevel.Remark,
-                $"UTCI batch: {n} items, {convCount} converged."
+                $"Fiala batch: {n} items, {convCount} converged."
             );
 
             // Set outputs as lists
-            DA.SetDataList(0, eqtList);
-            DA.SetDataList(1, dtsList);
-            DA.SetDataList(2, tskList);
-            DA.SetDataList(3, tcoList);
-            DA.SetDataList(4, swList);
-            DA.SetDataList(5, shList);
-            DA.SetDataList(6, iterList);
-            DA.SetDataList(7, convList);
+            DA.SetDataList(0, eqtList);    // EqT from Fiala 12-segment model
+            DA.SetDataList(1, dtsList);    // DTS from Fiala model
+            DA.SetDataList(2, tskList);    // Mean skin temperature
+            DA.SetDataList(3, tcoList);    // Core temperature
+            DA.SetDataList(4, swList);     // Sweat rate
+            DA.SetDataList(5, shList);     // Shivering
+            DA.SetDataList(6, iterList);   // Iterations
+            DA.SetDataList(7, convList);   // Converged flag
         }
     }
 }

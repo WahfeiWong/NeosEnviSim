@@ -7,7 +7,7 @@ using ThermalComfort.Core;
 namespace ThermalComfort
 {
     /// <summary>
-    /// UTCI Weather Settings - Environmental parameter configuration.
+    /// Human Thermal Environment - Environmental parameter configuration.
     /// 
     /// Provides structured weather data including automatic calculation of:
     /// - Vapour pressure from RH (Goff-Gratch formula)
@@ -20,11 +20,11 @@ namespace ThermalComfort
     ///   Int J Biometeorol, 56, 461-470.
     /// - Goff, J.A. & Gratch, S. (1946). Trans ASHVE, 52, 95-122.
     /// </summary>
-    public class UtciWeatherSettings : GH_Component
+    public class HumanThermalEnvironment : GH_Component
     {
-        public UtciWeatherSettings()
-            : base("UTCI Weather Settings", "UTCI_WSet",
-                  "Configure environmental parameters for UTCI simulation. " +
+        public HumanThermalEnvironment()
+            : base("Human Thermal Environment", "HTE",
+                  "Configure environmental parameters for human thermoregulation simulation. " +
                   "Auto-calculates vapour pressure from RH and clothing insulation from air temp.",
                   "Neos", "Thermophysics")
         { }
@@ -84,8 +84,8 @@ namespace ThermalComfort
 
         protected override void RegisterOutputParams(GH_Component.GH_OutputParamManager pManager)
         {
-            pManager.AddGenericParameter("WeatherSet", "WS",
-                "Structured weather data for UTCI Simulator",
+            pManager.AddGenericParameter("Human Thermal Environment", "HTE",
+                "Structured weather data for Human Thermoregulation Simulator",
                 GH_ParamAccess.item);
         }
 

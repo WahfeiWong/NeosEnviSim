@@ -7,7 +7,7 @@ using ThermalComfort.Core;
 namespace ThermalComfort
 {
     /// <summary>
-    /// UTCI Human Settings - Human physiological and activity parameter configuration.
+    /// Human Physiology - Human physiological and activity parameter configuration.
     /// 
     /// Supports AutoMet: metabolic rate auto-calculated from walk speed per ISO 8996.
     /// Includes consistency check between manually input MetRate and WalkSpeed.
@@ -17,11 +17,11 @@ namespace ThermalComfort
     /// - ISO 8996 (2004). Ergonomics - Determination of metabolic rate.
     /// - Havenith, G. et al. (2012). Int J Biometeorol, 56, 461-470 (UTCI clothing).
     /// </summary>
-    public class UtciHumanSettings : GH_Component
+    public class HumanPhysiology : GH_Component
     {
-        public UtciHumanSettings()
-            : base("UTCI Human Settings", "UTCI_HSet",
-                  "Configure human/activity parameters for UTCI simulation. " +
+        public HumanPhysiology()
+            : base("Human Physiology", "HP",
+                  "Configure human/activity parameters for human thermoregulation simulation. " +
                   "Supports automatic metabolic rate calculation from walk speed.",
                   "Neos", "Thermophysics")
         { }
@@ -46,7 +46,7 @@ namespace ThermalComfort
 
             pManager.AddNumberParameter("MetRate", "M",
                 "Metabolic heat production [W/m2]. AutoMet=true: ignored. " +
-                "AutoMet=false: used as absolute value. Default 80 W/m2 for UTCI reference " +
+                "AutoMet=false: used as absolute value. Default 80 W/m2 for human thermoregulation reference " +
                 "(standing, light activity). Range: 58-400 W/m2.",
                 GH_ParamAccess.item, 80.0);
             pManager[1].Optional = true;
@@ -69,9 +69,9 @@ namespace ThermalComfort
             // --- Clothing group ---
             pManager.AddBooleanParameter("AutoClo", "AutoClo",
                 "If true (default), clothing insulation is auto-adjusted by air temperature " +
-                "using the UTCI clothing model (Havenith et al. 2012) in Weather Settings. " +
+                "using the UTCI clothing model (Havenith et al. 2012) in Human Thermal Environment settings. " +
                 "If false, uses CloValue input.",
-                GH_ParamAccess.item, true);
+                GH_ParamAccess.item, false);
             pManager[4].Optional = true;
 
             pManager.AddNumberParameter("CloValue", "Icl",
@@ -92,7 +92,7 @@ namespace ThermalComfort
             pManager[7].Optional = true;
 
             pManager.AddNumberParameter("Age", "Age",
-                "Age [years]. Default 35. Affects UTCI reference response.",
+                "Age [years]. Default 35. Affects human thermoregulation response.",
                 GH_ParamAccess.item, 35.0);
             pManager[8].Optional = true;
 
@@ -105,8 +105,8 @@ namespace ThermalComfort
 
         protected override void RegisterOutputParams(GH_Component.GH_OutputParamManager pManager)
         {
-            pManager.AddGenericParameter("HumanSet", "HS",
-                "Structured human/activity data for UTCI Simulator",
+            pManager.AddGenericParameter("HumanPhysiology", "HP",
+                "Structured human/activity data for Human Thermoregulation Simulator",
                 GH_ParamAccess.item);
         }
 

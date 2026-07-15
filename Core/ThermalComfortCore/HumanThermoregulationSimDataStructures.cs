@@ -156,6 +156,31 @@ namespace ThermalComfort.Core
     }
 
     /// <summary>
+    /// Simulation base settings - exposes internal parameters for advanced control.
+    /// Reference environment, solver control, and physiology coefficients.
+    /// All parameters have sensible defaults; override only when needed.
+    /// </summary>
+    public class SimulationSettings
+    {
+        // --- Reference environment (defines EqT baseline) ---
+        public double RefMetRate { get; set; }     // M_ref [W/m2]  PET:80, UTCI:80, PMV:70
+        public double RefWindSpeed { get; set; }   // v_ref [m/s]   PET:0.1, UTCI:0.5, PMV:0.1
+        public double RefRH { get; set; }          // RH_ref [%]    All standards: 50
+        public double RefIcl { get; set; }         // Icl_ref [clo] PET:0.5, UTCI:adaptive, PMV:user
+
+        // --- Solver control ---
+        public int MaxIter { get; set; }           // Max iterations per CoreSolve
+        public double ResidTol { get; set; }       // Blood pool temperature tolerance [K]
+        public double BlpRelax { get; set; }       // Relaxation factor alpha (0.3-0.9)
+        public int EqTSearchIter { get; set; }     // Binary search iterations for EqT
+
+        // --- Physiology coefficients ---
+        public double InsensibleDiff { get; set; } // Baseline skin wetness [-] (Gagge:0.06)
+        public double AgeAttenuation { get; set; } // >65 response attenuation factor
+        public double SexMetFactor { get; set; }   // Female basal M relative to male (ISO:0.90)
+    }
+
+    /// <summary>
     /// Structured human/activity data for UTCI simulation.
     /// </summary>
     public class UtciHumanSet
@@ -178,8 +203,8 @@ namespace ThermalComfort.Core
     public class UtciResultSet
     {
         // --- Primary outputs ---
-        public double EquivalentTemperature { get; set; }  // Physiological equivalent temperature [degC]
-        public double DTS { get; set; }            // Dynamic Thermal Sensation [-3 to +3]
+        public double EquivalentTemperature { get; set; }  // Physiological equivalent temperature [degC] (Fiala model)
+        public double DTS { get; set; }            // Dynamic Thermal Sensation [-3 to +3] (Fiala model)
 
         // --- Body temperatures ---
         public double MeanSkinTemp { get; set; }   // Area-weighted mean skin [degC]
@@ -316,4 +341,38 @@ namespace ThermalComfort.Core
                    $"iter={Value.Iterations}, {status}]";
         }
     }
+
+    public class GH_SimulationSettings : GH_Goo<SimulationSettings>
+    {
+        public GH_SimulationSettings() : base(new SimulationSettings()) { }
+        public GH_SimulationSettings(SimulationSettings ss) : base(ss) { }
+
+        public override bool IsValid => Value != null;
+        public override string IsValidWhyNot => IsValid ? "" : "Invalid Simulation Settings";
+        public override string TypeName => "Simulation Settings";
+        public override string TypeDescription => "Base settings for human thermoregulation simulation";
+
+        public override IGH_Goo Duplicate()
+        {
+            if (Value == null) return new GH_SimulationSettings();
+            return new GH_SimulationSettings(new SimulationSettings
+            {
+                RefMetRate = Value.RefMetRate, RefWindSpeed = Value.RefWindSpeed,
+                RefRH = Value.RefRH, RefIcl = Value.RefIcl,
+                MaxIter = Value.MaxIter, ResidTol = Value.ResidTol,
+                BlpRelax = Value.BlpRelax, EqTSearchIter = Value.EqTSearchIter,
+                InsensibleDiff = Value.InsensibleDiff, AgeAttenuation = Value.AgeAttenuation,
+                SexMetFactor = Value.SexMetFactor
+            });
+        }
+
+        public override string ToString()
+        {
+            if (Value == null) return "Null Simulation Settings";
+            return $"SimSettings [Ref: M={Value.RefMetRate:F0}W/m2 v={Value.RefWindSpeed:F1}m/s " +
+                   $"RH={Value.RefRH:F0}% Icl={Value.RefIcl:F1}clo, " +
+                   $"Solver: iter={Value.MaxIter} tol={Value.ResidTol:F3}K relax={Value.BlpRelax:F1}]";
+        }
+    }
+
 }
