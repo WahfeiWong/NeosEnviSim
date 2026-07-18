@@ -1,20 +1,16 @@
 # MRT (Mean Radiant Temperature) Module
 
-This module calculates the Mean Radiant Temperature (MRT) for the human body in outdoor environments. It is based on backward ray-tracing building/vegetation occlusion analysis, supports both the SolarCal (ASHRAE 55) and RayMan calculation models, and employs full 4π spherical view factor decomposition to achieve physically correct longwave radiation computation.
+This module calculates the Mean Radiant Temperature (MRT) for the human body in outdoor environments. It is based on backward ray-tracing building/vegetation occlusion analysis and supports both the SolarCal (ASHRAE 55) and RayMan calculation models. Full-sphere (4π) view factors are decomposed into **five components** (sky, ground, opaque obstacles, trees, translucent shades), and both longwave and diffuse radiation are computed per component, achieving physically correct radiative environment modeling.
 
-**Enhanced (2026-06-16):** 
-1. Decomposed view factors (TVF/TRVF) for precise diffuse radiation calculation. OVF is now OPAQUE-ONLY.
-2. Longwave radiation decomposition expanded from 3 to 5 components (sky, ground, opaque obstacle, tree canopy, translucent shade), each with independent surface temperatures via ObsSet component.
-3. Tsur input removed from MRT component; all surface temperatures (T_opaque, T_canopy, T_translucent) moved to ObsSet component.
-4. MRT outputs reorganized into 4 categories: MRT-related (9), view factors (5), exposure (2), other (1) = 17 total.
+**Current Version Highlights (2026-06-16):**
+1. **Five-component view factor decomposition**: SVF / GVF / OVF_opaque / TVF / TRVF are mutually exclusive and satisfy conservation; overlapping directions are classified by priority Opaque > TreeDetail > TranslucentShade.
+2. **Five-component longwave decomposition**: sky, ground, opaque obstacles, tree canopy, and translucent shade each contribute an independent longwave term with its own surface temperature.
+3. **Surface temperatures moved to the ObsSet component**: the Tsur input has been removed from the MRT component; opaque surface temperature (T_opaque), tree canopy temperature (T_tree), and translucent surface temperature (T_trans) are provided via the ObsSet component as a single value or an 8760-hourly series, falling back to air temperature when omitted.
+4. **MRT component I/O reorganized**: 8 inputs and 17 outputs (9 MRT-related, 5 view factors, 2 exposure factors, 1 other), with each of the five longwave component contributions output individually.
 
-**Enhanced (2026-06-16):** Decomposed view factors for precise diffuse radiation calculation. The OVF (Obstacle View Factor) is now **OPAQUE-ONLY**, with TVF (Tree View Factor) and TRVF (Translucent View Factor) added as separate components. The effective diffuse irradiance formula now accounts for partial transmission through tree canopies (Beer-Lambert law) and translucent materials:
+**Previous Enhancement (2026-06-15):** Corrected DNI physics — when a ray intersects multiple non-opaque obstacle types, the DNI contribution is the **product** of individual contributions from each (or multiple same-type) obstacle, rather than considering only the nearest occlusion from the sun direction. Added `CalculateRayDNITransmission` core method, replacing the legacy `ClassifyRayHit` single-obstacle classification logic. ObsSet input is **no longer backward-compatible**, only accepts ObstacleSet encapsulated data.
 
-$$I_{\text{DH,eff}} = I_{\text{DH}} \cdot \left( F_{\text{SVF}} + F_{\text{TVF}} \cdot e^{-k_c \cdot \text{LAD} \cdot l} + F_{\text{TRVF}} \cdot \tau \right)$$
-
-**Enhanced (2026-06-15):** Corrected DNI physics — when a ray intersects multiple non-opaque obstacle types, the DNI contribution is the **product** of individual contributions from each (or multiple same-type) obstacle, rather than considering only the nearest occlusion from the sun direction. Added `CalculateRayDNITransmission` core method, replacing the legacy `ClassifyRayHit` single-obstacle classification logic. ObsSet input is **no longer backward-compatible**, only accepts ObstacleSet encapsulated data.
-
-**Enhanced (2026-06-14):** Introduces fine-grained Direct Normal Irradiance (DNI) exposure factor calculation, supporting differentiated transmission through three obstacle types: opaque objects (full block), trees (Beer-Lambert canopy transmission), and translucent sunshades (fixed transmittance). A classified Obstacle Set (ObstacleSet) replaces the original flat Brep list input to achieve more accurate direct radiation calculation.
+**Previous Enhancement (2026-06-14):** Introduces fine-grained Direct Normal Irradiance (DNI) exposure factor calculation, supporting differentiated transmission through three obstacle types: opaque objects (full block), trees (Beer-Lambert canopy transmission), and translucent sunshades (fixed transmittance).
 
 ---
 
@@ -22,7 +18,7 @@ $$I_{\text{DH,eff}} = I_{\text{DH}} \cdot \left( F_{\text{SVF}} + F_{\text{TVF}}
 
 ### 1.1 SolarCal Model (ASHRAE 55)
 
-Based on the SolarCal model from ASHRAE Standard 55, combining shortwave solar radiation increment with three-directional longwave radiation decomposition.
+Based on the SolarCal model from ASHRAE Standard 55, combining the shortwave solar radiation increment with a **five-component longwave radiation decomposition**.
 
 **Shortwave Radiation Increment:**
 
@@ -30,14 +26,28 @@ The solar radiation flux received by the human body consists of direct radiation
 
 $$I_{\text{body}} = f_{\text{DNI}} \cdot f_p(\gamma) \cdot I_{\text{DN}} + \frac{1}{2} f \cdot I_{\text{DH,eff}} + \frac{1}{2} f \cdot F_{\text{GVF}} \cdot \rho_g \cdot I_{\text{GH}}$$
 
+**Effective diffuse irradiance (five-component decomposition):**
+
+$$I_{\text{DH,eff}} = I_{\text{DH}} \cdot \left( F_{\text{SVF}} + F_{\text{TVF}} \cdot e^{-k_c \cdot \text{LAD} \cdot l} + F_{\text{TRVF}} \cdot \tau \right)$$
+
 Where:
-- $f_{\text{DNI}}$: **Effective DNI exposure factor** (0–1), combining exposure and transmission effects (see Section 2.1 enhanced description)
+- $F_{\text{SVF}}$: Sky view factor (fraction of directions with visible sky)
+- $F_{\text{TVF}}$: Tree view factor (fraction of directions blocked by tree detail meshes)
+- $F_{\text{TRVF}}$: Translucent view factor (fraction of directions blocked by translucent shade meshes)
+- $k_c$: Canopy extinction coefficient
+- $\text{LAD}$: Leaf area density [m²/m³]
+- $l$: Characteristic canopy thickness [m], taken as the Z-extent of the combined bounding box of all simplified canopy meshes
+- $\tau$: Shortwave transmittance of translucent materials
+
+That is: diffuse radiation from sky directions arrives in full; diffuse from tree directions is attenuated by the Beer-Lambert law; diffuse from translucent directions is attenuated by the transmittance $\tau$; opaque obstacle directions ($F_{\text{OVF,opaque}}$) contribute no diffuse radiation.
+
+Additional symbols:
+- $f_{\text{DNI}}$: **Effective DNI exposure factor** (0–1), combining exposure and transmission effects (see Section 2.1)
 - $f_p(\gamma)$: Solar projection coefficient (see equation below)
 - $I_{\text{DN}}$: Direct normal irradiance [W/m²]
 - $I_{\text{DH}}$: Horizontal diffuse irradiance [W/m²]
 - $I_{\text{GH}}$: Horizontal global irradiance [W/m²]
 - $f$: Posture efficiency factor (standing $f=0.725$, sitting $f=0.696$)
-- $F_{\text{SVF}}$: Sky view factor
 - $F_{\text{GVF}}$: Ground view factor
 - $\rho_g$: Ground reflectance
 
@@ -49,21 +59,31 @@ $$\Delta T_{\text{sw}} = \frac{I_{\text{body}} \cdot (\alpha / \varepsilon)}{f \
 
 Where $\alpha$ is the human body shortwave absorptivity, $\varepsilon$ is the human body longwave emissivity, and $h_r$ is the radiative heat transfer coefficient [W/(m²·K)].
 
-**Three-Directional Longwave Radiation Decomposition:**
+**Five-Component Longwave Radiation Decomposition (2026-06-16):**
 
-$$\Delta T_{\text{lw}} = c_{\text{lw}} \cdot \left[ F_{\text{SVF}} \cdot (T_{\text{sky}} - T_{\text{ref}}) + F_{\text{GVF}} \cdot (T_g - T_{\text{ref}}) + F_{\text{OVF,opaque}} \cdot (T_{\text{obs}} - T_{\text{ref}}) + F_{\text{TVF}} \cdot (T_{\text{canopy}} - T_{\text{ref}}) + F_{\text{TRVF}} \cdot (T_{\text{translucent}} - T_{\text{ref}}) \right]$$
+The MRT increment due to longwave radiation is computed separately for each of the five environmental surface categories and summed linearly:
+
+$$\Delta T_{\text{lw}} = c_{\text{lw}} \cdot \left[ F_{\text{SVF}} (T_{\text{sky}} - T_{\text{ref}}) + F_{\text{GVF}} (T_g - T_{\text{ref}}) + F_{\text{OVF,opaque}} (T_{\text{opaque}} - T_{\text{ref}}) + F_{\text{TVF}} (T_{\text{canopy}} - T_{\text{ref}}) + F_{\text{TRVF}} (T_{\text{trans}} - T_{\text{ref}}) \right]$$
 
 Where:
 - $c_{\text{lw}}$: Longwave linearization coefficient (default 0.5)
-- $T_{\text{sky}}$: Sky effective temperature [°C]
-- $T_g$: Ground temperature [°C]
-- $T_{\text{obs}}$: Surrounding obstacle surface temperature [°C]
-- $T_{\text{ref}}$: Reference temperature (equal to air temperature) [°C]
-- $F_{\text{OVF}}$: Obstacle view factor
+- $T_{\text{ref}}$: Reference temperature, equal to the air temperature $T_a$ [°C]
 
-**ENHANCED (2026-06-16) — Five-Component View Factor Decomposition:**
+View factors, surface temperatures, and their data sources for each component:
 
-The full-sphere (4π) view factors are now decomposed into five mutually exclusive components:
+| Component | View Factor | Surface Temp. | Temperature Source | Fallback |
+|:---:|:---:|:---:|:---|:---:|
+| Sky | $F_{\text{SVF}}$ | $T_{\text{sky}}$ | Derived from horizontal infrared $I_{\text{IR}}$ and sky emissivity $\varepsilon_{\text{sky}}$ (see below) | — |
+| Ground | $F_{\text{GVF}}$ | $T_g$ | Tg input of the MRT component (4 input modes) | $T_a$ |
+| Opaque obstacle | $F_{\text{OVF,opaque}}$ | $T_{\text{opaque}}$ | T_opaque input of the ObsSet component (single value or 8760 hourly) | $T_a$ |
+| Tree canopy | $F_{\text{TVF}}$ | $T_{\text{canopy}}$ | T_tree input of the ObsSet component (single value or 8760 hourly) | $T_a$ |
+| Translucent shade | $F_{\text{TRVF}}$ | $T_{\text{trans}}$ | T_trans input of the ObsSet component (single value or 8760 hourly) | $T_a$ |
+
+Each component contribution is output individually by the MRT component (dTlw_sky / dTlw_grd / dTlw_opq / dTlw_tree / dTlw_trans); the total increment $\Delta T_{\text{lw}}$ is their sum (see Section 3.2).
+
+**Five-Component View Factor Decomposition:**
+
+The full-sphere (4π) view factors are decomposed into five mutually exclusive components:
 
 | Component | Symbol | Description |
 |:---:|:---:|:---|
@@ -97,31 +117,43 @@ $$T_{\text{sky}} = \left( \frac{I_{\text{IR}}}{\varepsilon_{\text{sky}} \cdot \s
 
 Where $I_{\text{IR}}$ is the horizontal infrared radiation [W/m²], $\sigma = 5.67 \times 10^{-8}$ W/(m²·K⁴).
 
-When $\varepsilon_{\text{sky}} < 0$ (auto mode), dew point temperature is used for calculation:
+When $\varepsilon_{\text{sky}} < 0$ (auto mode, default), dew point temperature is used:
 
-$$\varepsilon_{\text{sky}} = 0.711 + 0.56 \cdot T_d + 0.73 \cdot T_d^2$$
+$$\varepsilon_{\text{sky}} = 0.711 + 0.56 \cdot \frac{T_d}{100} + 0.73 \cdot \left(\frac{T_d}{100}\right)^2$$
 
-Where $T_d$ is the dew point temperature [°C], and the result is constrained within the range [0.5, 1.0].
+Where $T_d$ is the dew point temperature [°C], and the result is constrained within [0.5, 1.0]. If dew point data is missing, total sky cover is used instead ($\varepsilon_{\text{sky}} = 0.75 + 0.02 N$, where $N$ is the total sky cover, also constrained to [0.5, 1.0]); if both are missing, $\varepsilon_{\text{sky}} = 1.0$ (blackbody sky).
 
 ### 1.2 RayMan Model
 
-Based on the RayMan model by Matzarakis et al., employing a complete radiation balance method.
+Based on the RayMan model by Matzarakis et al., employing a complete radiation balance method (quartic form).
 
-Longwave radiation in quartic form:
+**Longwave radiation uses the same five-component decomposition** as SolarCal, sharing the same set of decomposed view factors:
 
 $$T_{\text{MRT}} = (\text{mrtK}_4)^{0.25} - 273.15$$
 
 Where:
 
-$$\text{mrtK}_4 = \frac{1}{\sigma} \left( \left[ L_{\text{sky}} + \frac{\alpha}{\varepsilon} I_{\text{DH}} \right] F_{\text{SVF}} + \left[ L_g + \frac{\alpha}{\varepsilon} \rho_g I_{\text{GH}} \right] F_{\text{GVF}} + L_{\text{obs}} F_{\text{OVF}} \right) + \frac{\alpha \cdot I_{\text{direct}}}{\varepsilon \cdot \sigma}$$
+$$\text{mrtK}_4 = \frac{1}{\sigma} \left[ \left( L_{\text{sky}} + \frac{\alpha}{\varepsilon} I_{\text{DH,eff}} \right) F_{\text{SVF}} + \left( L_g + \frac{\alpha}{\varepsilon} \rho_g I_{\text{GH}} \right) F_{\text{GVF}} + L_{\text{obs}} F_{\text{OVF,opaque}} + L_{\text{tree}} F_{\text{TVF}} + L_{\text{trans}} F_{\text{TRVF}} \right] + \frac{\alpha \cdot I_{\text{direct}}}{\varepsilon \cdot \sigma}$$
 
-Longwave radiation in each direction:
+Longwave radiation in each direction (all temperatures in Kelvin):
 
-$$L_{\text{sky}} = \varepsilon_{\text{sky}} \cdot \sigma \cdot T_{\text{sky,K}}^4$$
+$$L_{\text{sky}} = \varepsilon \cdot \sigma \cdot T_{\text{sky,K}}^4$$
 
 $$L_g = \varepsilon_g \cdot \sigma \cdot T_{g,\text{K}}^4$$
 
-$$L_{\text{obs}} = \varepsilon_{\text{obs}} \cdot \sigma \cdot T_{\text{obs,K}}^4$$
+$$L_{\text{obs}} = \varepsilon_{\text{obs}} \cdot \sigma \cdot T_{\text{opaque,K}}^4$$
+
+$$L_{\text{tree}} = \varepsilon_{\text{obs}} \cdot \sigma \cdot T_{\text{canopy,K}}^4$$
+
+$$L_{\text{trans}} = \varepsilon_{\text{obs}} \cdot \sigma \cdot T_{\text{trans,K}}^4$$
+
+Where:
+- $T_{\text{sky,K}}$: Sky effective temperature [K] derived from $I_{\text{IR}}$ and $\varepsilon_{\text{sky}}$; the sky longwave term is weighted by the body emissivity $\varepsilon$ as absorbed by the human body
+- $\varepsilon_g$: Ground longwave emissivity (EpsGrd in MRT Settings, default 0.95)
+- $\varepsilon_{\text{obs}}$: Obstacle longwave emissivity (EpsObs in MRT Settings, default 0.95); **shared by all three obstacle surface categories: opaque objects, tree canopy, and translucent shade**
+- $T_{\text{opaque,K}}$, $T_{\text{canopy,K}}$, $T_{\text{trans,K}}$: Surface temperatures [K] of the three obstacle categories, sourced the same way as in SolarCal (via the ObsSet component; fallback to $T_a$ when not provided)
+- $I_{\text{DH,eff}}$: Effective diffuse irradiance from the five-component decomposition (same formula as SolarCal, see Section 1.1)
+- The ground-reflected shortwave term $\rho_g I_{\text{GH}}$ is applied to the ground direction only ($F_{\text{GVF}}$)
 
 Direct solar radiation term (applied only when $I_{\text{DN}} > 0$ and $f_{\text{DNI}} > 0$):
 
@@ -227,20 +259,32 @@ Where $t_{\text{entry}}$ is the first valid intersection parameter where the ray
 | `CalculateDNIExposureFactor()` | Single-point effective DNI exposure factor | Internally calls `CalculateRayDNITransmission` |
 | `CalculateDNIExposureFactorsBatch()` | Batch effective DNI exposure factor (parallel) | Internally calls `CalculateDNIExposureFactor` |
 
-### 2.2 Full 4π Spherical View Factor Decomposition
+### 2.2 Full 4π Spherical View Factor Decomposition (Five Components)
 
-The full surrounding space of the human body (4π sphere) is decomposed into three parts, satisfying the conservation condition:
+The full surrounding space of the human body (4π sphere) is decomposed into **five mutually exclusive components**, satisfying the conservation condition:
 
-$$F_{\text{SVF}} + F_{\text{GVF}} + F_{\text{OVF}} = 1.0$$
+$$F_{\text{SVF}} + F_{\text{GVF}} + F_{\text{OVF,opaque}} + F_{\text{TVF}} + F_{\text{TRVF}} = 1.0$$
+
+| Component | Symbol | Description |
+|:---:|:---:|:---|
+| Sky View Factor | $F_{\text{SVF}}$ | Visible sky (Z > 0, no obstruction) |
+| Ground View Factor | $F_{\text{GVF}}$ | Visible ground (Z < 0, no obstruction) |
+| Opaque Obstacle View Factor | $F_{\text{OVF,opaque}}$ | Blocked by opaque objects only |
+| Tree View Factor | $F_{\text{TVF}}$ | Blocked by tree detail meshes |
+| Translucent View Factor | $F_{\text{TRVF}}$ | Blocked by translucent shade meshes |
 
 **Algorithm Flow:**
 
 1. Use the Fibonacci (golden angle) spiral to generate $N$ uniformly distributed full-sphere direction vectors
-2. Emit a ray from the analysis point in each direction
-3. Classify results based on ray tracing:
-   - Ray unoccluded and $Z > 0$ → counted toward sky view factor $F_{\text{SVF}}$
-   - Ray unoccluded and $Z < 0$ → counted toward ground view factor $F_{\text{GVF}}$
-   - Ray occluded by obstacles → counted toward obstacle view factor $F_{\text{OVF}}$
+2. Emit a ray from the analysis point (eye height) in each direction
+3. Classify each ray by priority (**Opaque > TreeDetail > TranslucentShade**):
+   - Ray hits an opaque object → counted toward $F_{\text{OVF,opaque}}$
+   - Otherwise hits a tree detail mesh → counted toward $F_{\text{TVF}}$
+   - Otherwise hits a translucent shade mesh → counted toward $F_{\text{TRVF}}$
+   - Unoccluded and $Z > 0$ → counted toward $F_{\text{SVF}}$
+   - Unoccluded and $Z < 0$ → counted toward $F_{\text{GVF}}$
+
+> **Note:** The simplified tree canopy envelope (TreeCanopy) does **not** participate in view-factor occlusion; it is used only for Beer-Lambert path-length calculation. View-factor occlusion is based solely on the Opaque + TreeDetail + TranslucentShade meshes.
 
 **Fibonacci Sphere Sampling:**
 
@@ -262,7 +306,7 @@ $$z_i = \sqrt{1 - \frac{i}{N}}, \quad i = 0, 1, \ldots, N-1$$
 
 ---
 
-## 3. MRT Calculator Component (MRTcalculator.cs)
+## 3. MRT Calculator Component (OutdoorMRT.cs)
 
 ### 3.1 Input Parameters
 
@@ -270,15 +314,16 @@ $$z_i = \sqrt{1 - \frac{i}{N}}, \quad i = 0, 1, \ldots, N-1$$
 |:---:|:---:|:---:|:---|
 | 0 | EPW File | Text | EPW weather file path |
 | 1 | Analysis Points | Point3d List | Ground analysis points (must be located at ground surface Z=0, not meteorological height) |
-| 2 | Obstacle Set | Generic | **ObsSet (2026-06-15)**: Only accepts ObstacleSet encapsulated data. Connect ObsSet component. Supports opaque buildings, tree canopy transmission (Beer-Lambert), translucent sunshades. **List<Brep>/List<Mesh> direct input no longer accepted** |
+| 2 | Obstacle Set | Generic | **ObsSet (2026-06-15)**: Only accepts ObstacleSet encapsulated data. Connect ObsSet component. Supports opaque buildings, tree canopy transmission (Beer-Lambert), translucent sunshades, and per-category surface temperatures. **List&lt;Brep&gt;/List&lt;Mesh&gt; direct input no longer accepted** |
 | 3 | MRT Settings | Generic | MRT configuration settings (optional, default new settings) |
 | 4 | Time Settings | Generic | Simulation time period (optional, default full year 8760h) |
 | 5 | Air Temperature (Ta) | Number Tree | Air temperature [°C], supports 4 input modes (optional) |
 | 6 | Ground Temperature (Tg) | Number Tree | Ground temperature [°C], supports 4 input modes (optional) |
-| 7 | Surrounding Surface Temp (Tsur) | Number List | Surrounding obstacle surface temperature [°C] (optional) |
-| 8 | Run | Boolean | Set to true to execute simulation |
+| 7 | Run | Boolean | Set to true to execute simulation |
 
-> **Important Change (2026-06-15):** ObsSet input (index 2) is **no longer backward-compatible**. Only accepts ObstacleSet type data; List<Brep> or List<Mesh> are rejected. Geometric obstacles must be pre-processed through the ObsSet component.
+> **Important Change (2026-06-16):** The Tsur (surrounding surface temperature) input has been **removed**. The surface temperatures of opaque obstacles, tree canopies, and translucent shades are provided via the T_opaque, T_tree, and T_trans inputs of the ObsSet component (single value or 8760-hourly series), falling back to air temperature $T_a$ when omitted.
+
+> **Important Change (2026-06-15):** ObsSet input (index 2) is **no longer backward-compatible**. Only accepts ObstacleSet type data; List&lt;Brep&gt; or List&lt;Mesh&gt; are rejected. Geometric obstacles must be pre-processed through the ObsSet component.
 
 **Ta/Tg Input Modes:**
 
@@ -289,23 +334,44 @@ $$z_i = \sqrt{1 - \frac{i}{N}}, \quad i = 0, 1, \ldots, N-1$$
 | 3 | 8760 values | Hourly varying temperature (shared by all points) |
 | 4 | N×8760 Tree | Per-point hourly varying temperature |
 
-### 3.2 Output Parameters
+### 3.2 Output Parameters (17 items)
+
+**MRT-related (indices 0–8):**
 
 | Index | Parameter | Description |
 |:---:|:---:|:---|
-| 0 | MRT | Mean radiant temperature [°C], per point per hour |
-| 1 | SVF | Sky view factor [0–1], full 4π sampling |
-| 2 | GVF | Ground view factor [0–1], full 4π sampling |
-| 3 | OVF | Obstacle view factor [0–1], full 4π sampling |
-| 4 | Exp | Solar exposure factor $f_{\text{exp}}$ [0–1], per point per hour (binary: exposed/shaded) |
-| 5 | **DNIExp** | Effective DNI exposure factor $f_{\text{DNI}}$ [0–1], combining exposure and multi-obstacle transmission |
-| 6 | dT_sw | MRT increment due to shortwave radiation [°C] |
-| 7 | dT_lw | Total MRT increment due to longwave radiation [°C] |
-| 8 | dT_lw_sky | Sky longwave component contribution [°C] |
-| 9 | dT_lw_grd | Ground longwave component contribution [°C] |
-| 10 | dT_lw_obs | Obstacle longwave component contribution [°C] |
-| 11 | HrMRT | Hourly average MRT of all points [°C] |
-| 12 | SunVec | Solar vector for each analysis time step |
+| 0 | MRT | Mean radiant temperature [°C], per point per hour (Tree, branch = point) |
+| 1 | dTsw | MRT increment due to shortwave radiation [°C] |
+| 2 | dTlw | Total MRT increment due to longwave radiation [°C] (sum of the five components) |
+| 3 | dTlw_sky | Sky longwave component contribution [°C], $c_{\text{lw}} \cdot F_{\text{SVF}} \cdot (T_{\text{sky}} - T_{\text{ref}})$ |
+| 4 | dTlw_grd | Ground longwave component contribution [°C], $c_{\text{lw}} \cdot F_{\text{GVF}} \cdot (T_g - T_{\text{ref}})$ |
+| 5 | dTlw_opq | Opaque obstacle longwave component contribution [°C], $c_{\text{lw}} \cdot F_{\text{OVF,opaque}} \cdot (T_{\text{opaque}} - T_{\text{ref}})$ |
+| 6 | dTlw_tree | Tree canopy longwave component contribution [°C], $c_{\text{lw}} \cdot F_{\text{TVF}} \cdot (T_{\text{canopy}} - T_{\text{ref}})$ |
+| 7 | dTlw_trans | Translucent shade longwave component contribution [°C], $c_{\text{lw}} \cdot F_{\text{TRVF}} \cdot (T_{\text{trans}} - T_{\text{ref}})$ |
+| 8 | HrMRT | Hourly average MRT across all points [°C] (List) |
+
+**View factors (indices 9–13, List, one value per point):**
+
+| Index | Parameter | Description |
+|:---:|:---:|:---|
+| 9 | SVF | Sky view factor [0–1], full 4π sampling |
+| 10 | GVF | Ground view factor [0–1], full 4π sampling |
+| 11 | OVF | Opaque obstacle view factor [0–1] (**opaque only**, full 4π sampling) |
+| 12 | TVF | Tree view factor [0–1], full 4π sampling |
+| 13 | TRVF | Translucent shade view factor [0–1], full 4π sampling |
+
+**Exposure factors (indices 14–15, Tree, per point per hour):**
+
+| Index | Parameter | Description |
+|:---:|:---:|:---|
+| 14 | Exp | Solar exposure factor $f_{\text{exp}}$ [0–1] (binary: exposed/shaded) |
+| 15 | DNIExp | Effective DNI exposure factor $f_{\text{DNI}}$ [0–1], combining exposure and multi-obstacle transmission |
+
+**Other (index 16):**
+
+| Index | Parameter | Description |
+|:---:|:---:|:---|
+| 16 | SunVec | Solar vector for each analysis time step (List) |
 
 ---
 
@@ -328,15 +394,15 @@ $$z_i = \sqrt{1 - \frac{i}{N}}, \quad i = 0, 1, \ldots, N-1$$
 | SVF Sample Count | SVF_N | - | 1000 | Full 4π sphere sample count |
 | Longwave Coeff | LwCoeff | - | 0.5 | Longwave linearization coefficient |
 | Ground Emissivity | EpsGrd | - | 0.95 | Ground longwave emissivity (RayMan only) |
-| Obstacle Emissivity | EpsObs | - | 0.95 | Obstacle longwave emissivity (RayMan only) |
+| Obstacle Emissivity | EpsObs | - | 0.95 | Obstacle longwave emissivity (RayMan only; shared by opaque, tree canopy, and translucent surfaces) |
 
 ---
 
-## 5. Obstacle Set Component (ObsSetSettings.cs)
+## 5. Obstacle Set Component (ObsSet.cs)
 
 ### 5.1 Description
 
-The ObsSet component creates a classified obstacle set (`ObstacleSet`) that provides unified obstacle input for the MRT component, SpatialSoilThermalSimulator component, and RadSim component. By classifying obstacles into opaque objects, trees (with canopy transmission), and translucent sunshades, it enables fine-grained direct normal irradiance (DNI) calculation.
+The ObsSet component creates a classified obstacle set (`ObstacleSet`) that provides unified obstacle input for the MRT component, SpatialSoilThermalSimulator component, and RadSim component. By classifying obstacles into opaque objects, trees (with canopy transmission), and translucent sunshades, it enables fine-grained direct normal irradiance (DNI) calculation and five-component longwave radiation decomposition.
 
 **Core Principle (2026-06-15 Corrected):**
 - When a sample point is blocked by backward ray tracing, the traditional method completely ignores DNI contribution ($f_{\text{exp}}=0$ → DNI=0)
@@ -344,17 +410,28 @@ The ObsSet component creates a classified obstacle set (`ObstacleSet`) that prov
 - **Physical correction**: When a ray passes through multiple non-opaque obstacles, individual transmittances **multiply**, rather than taking only the nearest one
 - The effective DNI exposure factor $f_{\text{DNI}}$ combines exposure and transmission effects, replacing $f_{\text{exp}}$ in direct radiation calculations
 
+**Surface Temperature Settings (New 2026-06-16):**
+- ObsSet also provides independent surface temperature inputs for the three obstacle categories (T_opaque / T_tree / T_trans), used for the five-component longwave calculation in the MRT and soil thermal modules
+- Each temperature input accepts either a **single value** (fixed for the whole year) or **8760 values** (hourly series)
+- When omitted, the temperature falls back to the hourly air temperature $T_a$
+- The three temperature inputs are **not read by the RadSim component**; they are used solely by the MRT and soil thermal modules
+
 ### 5.2 Input Parameters
 
 | Index | Parameter | ID | Type | Default | Description |
 |:---:|:---:|:---:|:---:|:---:|:---|
 | 0 | Tree Detail | TreeDet | Mesh List | — | Detailed tree geometry mesh (leaves, branches) from Tree Processor |
 | 1 | Tree Canopy | TreeCan | Mesh List | — | Simplified tree canopy envelope mesh(es) for path-length calculation |
-| 2 | Leaf Area Density | LAD | Number | 1.0 | Leaf area density [m²/m³], leaf area per unit canopy volume |
-| 3 | Extinction Coeff | k | Number | 0.5 | Solar radiation extinction coefficient [-], Beer-Lambert parameter, typical 0.5–0.8 |
-| 4 | Translucent Shade | TransShd | Mesh List | — | Translucent sunshade / shading device mesh(es) |
-| 5 | Transmittance | Tau | Number | 0.05 | Direct solar transmittance of translucent sunshades [-], range 0.0–1.0 |
-| 6 | Opaque Objects | Opaque | Mesh List | — | Opaque obstacles (buildings, walls) that fully block direct radiation |
+| 2 | Leaf Area Density | LAD | Number | 1.0 | Leaf area density [m²/m³], leaf area per unit canopy volume (clamped to 0.01–50) |
+| 3 | Extinction Coeff | k | Number | 0.5 | Solar radiation extinction coefficient [-], Beer-Lambert parameter, typical 0.5–0.8 (clamped to 0.01–1.0) |
+| 4 | Tree Temperature | T_tree | Number List | — | Tree canopy surface temperature [°C], single value or 8760 hourly values (optional; falls back to $T_a$) |
+| 5 | Translucent Shade | TransShade | Mesh List | — | Translucent sunshade / shading device mesh(es) |
+| 6 | Transmittance | τ | Number | 0.05 | Shortwave transmittance of translucent sunshades [-], range 0.0–1.0 |
+| 7 | Translucent Temperature | T_trans | Number List | — | Translucent shade surface temperature [°C], single value or 8760 hourly values (optional; falls back to $T_a$) |
+| 8 | Opaque Objects | Opaque | Mesh List | — | Opaque obstacles (buildings, walls) that fully block direct radiation |
+| 9 | Opaque Temperature | T_opaque | Number List | — | Opaque obstacle surface temperature [°C], single value or 8760 hourly values (optional; falls back to $T_a$) |
+
+All 10 inputs are optional.
 
 **Typical Transmittance Reference Values:**
 
@@ -369,15 +446,17 @@ The ObsSet component creates a classified obstacle set (`ObstacleSet`) that prov
 
 | Index | Parameter | Description |
 |:---:|:---:|:---|
-| 0 | ObsSet | Classified obstacle set, connect to MRT/SpSoilSim/RadSim component's ObsSet input |
+| 0 | ObsSet | Classified obstacle set (with per-category surface temperatures), connect to MRT/SpSoilSim/RadSim component's ObsSet input |
 
 ### 5.4 Usage Notes
 
 1. **Tree Detail vs Tree Canopy**: Tree Detail is used for ray-hit detection (determining if a point is under tree shade) **and SVF view-factor occlusion judgment**; Tree Canopy is **only** used for Beer-Lambert path-length calculation (geometric distance $s$ the ray travels through the canopy) and **does not participate in SVF occlusion**. SVF calculation uses only Opaque + TreeDetail + TranslucentShade for physical occlusion — TreeCanopy is a simplified shrinkwrap envelope and should not be used as an occluding body. Both are required; if Tree Detail is provided without Tree Canopy, DNI transmission uses zero path length.
 
-2. **Strict Type Requirement (2026-06-15)**: The ObsSet inputs of MRT, SpSoilSim, and RadSim components **only accept ObstacleSet type data**, no longer backward-compatible with List<Brep> or List<Mesh> direct input. Geometric obstacles must be pre-processed through the ObsSet component.
+2. **Strict Type Requirement (2026-06-15)**: The ObsSet inputs of MRT, SpSoilSim, and RadSim components **only accept ObstacleSet type data**, no longer backward-compatible with List&lt;Brep&gt; or List&lt;Mesh&gt; direct input. Geometric obstacles must be pre-processed through the ObsSet component.
 
 3. **Mesh Input**: The ObsSet component itself supports direct Mesh type input. If Surface or Brep types are provided, Grasshopper can implicitly convert them to Mesh.
+
+4. **Temperature Input Modes**: T_opaque / T_tree / T_trans accept ≥8760 values as an hourly series; a single value is applied year-round; when omitted, downstream components fall back to the hourly air temperature.
 
 ---
 
