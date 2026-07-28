@@ -1,6 +1,6 @@
 # NeosEnviSim
 ---
-Tools for **building environment simulation** with Grasshopper.
+Tools for **environmental simulation** in Grasshopper.
 ---
 Developed by **Huafei Huang**, since **2025**. 
 ---
