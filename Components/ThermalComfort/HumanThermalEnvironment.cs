@@ -70,7 +70,7 @@ namespace ThermalComfort
             // --- Wind group ---
             pManager.AddNumberParameter("WindSpeed", "Va",
                 "Wind speed at 1.5m pedestrian height [m/s]. Applied uniformly to all body " +
-                "segments (no log-profile conversion). Range: 0.5 to 17 m/s.",
+                "segments (no log-profile conversion). Range: 0.01 to 17 m/s.",
                 GH_ParamAccess.item, 1.0);
             pManager[5].Optional = true;
 

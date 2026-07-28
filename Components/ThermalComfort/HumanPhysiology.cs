@@ -68,9 +68,9 @@ namespace ThermalComfort
 
             // --- Clothing group ---
             pManager.AddBooleanParameter("AutoClo", "AutoClo",
-                "If true (default), clothing insulation is auto-adjusted by air temperature " +
+                "If true, clothing insulation is auto-adjusted by air temperature " +
                 "using the UTCI clothing model (Havenith et al. 2012) in Human Thermal Environment settings. " +
-                "If false, uses CloValue input.",
+                "If false, uses CloValue input.default false.",
                 GH_ParamAccess.item, false);
             pManager[4].Optional = true;
 
