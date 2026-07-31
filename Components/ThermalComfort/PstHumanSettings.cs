@@ -2,6 +2,7 @@ using System;
 using Grasshopper.Kernel;
 using NeosEnviSim.Properties;
 using ThermalComfort.Core;
+
 namespace ThermalComfort
 {
     /// <summary>
@@ -23,8 +24,11 @@ namespace ThermalComfort
     /// - Blazejczyk, K. (2005). MENEX_2005 - the updated version of man-environment 
     ///   heat exchange model. Proceedings of the 11th International Conference on 
     ///   Environmental Ergonomics, Ystad, Sweden, 222-225.
+    /// - Blazejczyk, K., & Matzarakis, A. (2007). Assessment of bioclimatic 
+    ///   differentiation of Poland based on the human heat balance. 
+    ///   Geographia Polonica, 80, 63-82.
     /// - ISO 8996 (2004). Ergonomics of the thermal environment - Determination of 
-    ///   metabolic rate.
+    ///   metabolic rate. International Organisation of Standardization, Geneva.
     /// - Fanger, P.O. (1970). Thermal Comfort: Analysis and Applications in 
     ///   Environmental Engineering. McGraw-Hill, New York.
     /// </summary>
@@ -42,9 +46,6 @@ namespace ThermalComfort
 
         protected override void RegisterInputParams(GH_Component.GH_InputParamManager pManager)
         {
-            // --- Metabolic rate group (AutoMet + MetRate + WalkSpeed) ---
-
-            // Auto metabolic rate toggle
             pManager.AddBooleanParameter("AutoMet", "AutoMet",
                 "If True (default), metabolic rate is auto-calculated from WalkSpeed " +
                 "using the ISO 8996 simplified relation: M = 58 + 70 * v_walk (m/s). " +
@@ -54,7 +55,6 @@ namespace ThermalComfort
                 GH_ParamAccess.item, true);
             pManager[0].Optional = true;
 
-            // Metabolic rate (W/m2), default 135 (walking 4km/h)
             pManager.AddNumberParameter("MetRate", "M",
                 "Metabolic heat production (W/m2). Sum of basal metabolic rate and " +
                 "activity-related heat production. Default 135 W/m2 corresponds to " +
@@ -64,7 +64,6 @@ namespace ThermalComfort
                 GH_ParamAccess.item, 135.0);
             pManager[1].Optional = true;
 
-            // Walking speed (m/s), default 1.1
             pManager.AddNumberParameter("WalkSpeed", "Vw",
                 "Velocity of person's motion relative to air (m/s). " +
                 "Default 1.1 m/s (approx. 4 km/h walking speed). " +
@@ -74,9 +73,6 @@ namespace ThermalComfort
                 GH_ParamAccess.item, 1.1);
             pManager[2].Optional = true;
 
-            // --- Clothing group (AutoClo + CloValue) ---
-
-            // Auto clothing insulation toggle
             pManager.AddBooleanParameter("AutoClo", "AutoClo",
                 "If True (default), clothing insulation is auto-adjusted by air temperature " +
                 "using the MENEX_2005 formula: Icl = 1.691 - 0.0436*t (clamped: " +
@@ -85,7 +81,6 @@ namespace ThermalComfort
                 GH_ParamAccess.item, true);
             pManager[3].Optional = true;
 
-            // Clothing insulation (clo), default 0.8 (summer typical)
             pManager.AddNumberParameter("CloValue", "Icl",
                 "Clothing insulation (clo). Summer typical value 0.8 clo. " +
                 "When AutoClo = True, this input is ignored and Icl is set by the " +
@@ -94,7 +89,6 @@ namespace ThermalComfort
                 GH_ParamAccess.item, 0.8);
             pManager[4].Optional = true;
 
-            // Clothing albedo (%), default 30%
             pManager.AddNumberParameter("AlbedoClo", "Alb",
                 "Clothing surface solar radiation reflectance/albedo (%). " +
                 "Default 30% for typical summer clothing. Range 10-90%. " +
@@ -111,26 +105,17 @@ namespace ThermalComfort
 
         protected override void SolveInstance(IGH_DataAccess DA)
         {
-            // --- Read inputs with defaults ---
-            // Input order: AutoMet(0), MetRate(1), WalkSpeed(2), AutoClo(3), CloValue(4), AlbedoClo(5)
-
-            // 1. AutoMet (must read first to determine MetRate source)
             bool autoMet = true;
             DA.GetData(0, ref autoMet);
 
-            // 2. WalkSpeed (must read before MetRate calculation)
             double walkSpeed = 1.1;
             DA.GetData(2, ref walkSpeed);
             if (walkSpeed < 0) walkSpeed = 0;
 
-            // 3. MetRate (auto-calculated or user-specified)
             double metRate = 135.0;
             if (autoMet)
             {
-                // ISO 8996 simplified relation: M = 58 + 70 * v_walk (m/s)
-                // Reference points: v=0 m/s -> M=58 W/m2 (rest), v=1.1 m/s -> M=135 W/m2 (4 km/h)
                 metRate = 58.0 + 70.0 * walkSpeed;
-                // Clamp to valid range
                 if (metRate < 58.0) metRate = 58.0;
                 if (metRate > 400.0) metRate = 400.0;
             }
@@ -139,7 +124,6 @@ namespace ThermalComfort
                 DA.GetData(1, ref metRate);
                 if (metRate < 58) metRate = 58;
 
-                // --- Consistency check: MetRate vs WalkSpeed ---
                 double expectedMet = 58.0 + 70.0 * walkSpeed;
                 if (Math.Abs(metRate - expectedMet) > 30.0)
                 {
@@ -151,23 +135,18 @@ namespace ThermalComfort
                 }
             }
 
-            // 4. AutoClo
             bool autoClo = true;
             DA.GetData(3, ref autoClo);
 
-            // 5. CloValue
             double cloValue = 0.8;
             DA.GetData(4, ref cloValue);
             if (cloValue < 0.1) cloValue = 0.1;
 
-            // 6. AlbedoClo
             double albedoClo = 30.0;
             DA.GetData(5, ref albedoClo);
             if (albedoClo < 0) albedoClo = 0;
             if (albedoClo > 100) albedoClo = 100;
 
-            // --- Additional physical consistency checks ---
-            // WalkSpeed > 2.0 m/s (fast walk/jog) with MetRate < 160 W/m2 is suspicious
             if (walkSpeed > 2.0 && metRate < 160.0)
             {
                 AddRuntimeMessage(GH_RuntimeMessageLevel.Warning,
@@ -176,7 +155,6 @@ namespace ThermalComfort
                     "Expected M >= 200 W/m2 for this activity level.");
             }
 
-            // --- Create and output human set (wrapped as GH_Goo for Grasshopper wire) ---
             var humanSet = new PstHumanSet
             {
                 MetRate = metRate,

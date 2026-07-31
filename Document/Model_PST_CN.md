@@ -4,7 +4,7 @@
 
 模块包含三个组件：
 - **PST Weather Settings**：气象参数配置组件（含 Goff-Gratch 水汽压计算与地表温度自动估算）
-- **PST Human Settings**：人体生理参数配置组件（含服装热阻温度自适应公式）
+- **PST Human Settings**：人体生理参数配置组件（含代谢率自动计算与服装热阻温度自适应）
 - **PST Simulator**：核心计算组件，实现 MENEX_2005 两阶段热平衡方法
 
 ---
@@ -28,12 +28,12 @@ $$M + Q + C + E + \text{Res} = S$$
 ### 1.2 两阶段计算方法
 
 **第一阶段（初始稳态）：**
-以环境接触时的初始皮肤温度 $T_s$ 计算各热流分量，输出 STI（主观温度指数）和 PhS（生理应变比 $C/E$）。
+以环境接触时的初始皮肤温度 $T_s$ 计算各热流分量，输出 STI（主观温度指数）、PhS（生理应变比 $C/E$）和 HL（热负荷指数）。
 
 **第二阶段（适应性稳态）：**
 根据第一阶段蒸发热损失 $E$ 修正皮肤温度（蒸发冷却效应），以调整后的皮肤温度 $T_{sR}$ 重新计算长波辐射、对流与蒸发项。太阳辐射吸收 $R$、代谢产热 $M$ 和呼吸热损失 $\text{Res}$ 保持第一阶段数值不变。输出 PST、PhS 等级和适应后皮肤温度。
 
-### 1.3  clothing 与换热系数
+### 1.3 Clothing 与换热系数
 
 **服装热阻 $I_{cl}$ [clo]：**
 
@@ -145,18 +145,35 @@ $$\text{Res} = 0.0014 \cdot M \cdot (t - 35) + 0.0173 \cdot M \cdot (0.1 \cdot e
 
 $$S = M + Q + C + E + \text{Res}$$
 
-**STI（主观温度指数）计算：**
+**STI（主观温度指数）[°C]：**
 
 $$\text{STI} = \begin{cases}
 \text{MRT} - \left\lbrace\left[\frac{|S|^{0.75}}{\varepsilon_h \cdot \sigma} + 273^4\right]^{0.25} - 273\right\rbrace & S < 0 \\
 \text{MRT} + \left\lbrace\left[\frac{|S|^{0.75}}{\varepsilon_h \cdot \sigma} + 273^4\right]^{0.25} - 273\right\rbrace & S \geq 0
 \end{cases}$$
 
-**PhS 比值（生理应变比）：**
+STI 单位为 °C，表示人体在生理适应机制触发前主观感受到的热负荷水平。分级参考：$< -38$ 极冷，$-38 \sim -20.1$ 很冷，$-20 \sim -0.5$ 冷，$-0.4 \sim 22.5$ 凉爽，$22.6 \sim 31.9$ 舒适，$32 \sim 45.9$ 温暖，$46 \sim 54.9$ 热，$55 \sim 69.9$ 很热，$\geq 70$ 酷热。
+
+**PhS 比值（生理应变比，无量纲）：**
 
 $$\text{PhS} = \frac{C}{E}$$
 
 当 $|E| < 0.001$ 时，取符号相关的极值（$E > 0$ 时为 1000，$E < 0$ 时为 -1000）。
+
+**HL（热负荷指数，无量纲）：**
+
+HL 反映体温调节中枢系统在适应过程中的负荷状态，由净体热蓄存 $S$ 和蒸发热损失 $E$ 联合计算：
+
+$$
+\text{HL} = \begin{cases}
+\left(\frac{S+1000}{1000}\right)^{\frac{5}{1+R}} & S < 0,\; E \geq -50 \\[6pt]
+\left(\frac{S+1000}{1000}\right)^{2 - \frac{1}{1+R}} & S \geq 0,\; E \geq -50 \\[6pt]
+\frac{E}{-50} \cdot \left(\frac{S+1000}{1000}\right)^{\frac{5}{1+R}} & S < 0,\; E < -50 \\[6pt]
+\frac{E}{-50} \cdot \left(\frac{S+1000}{1000}\right)^{2 - \frac{1}{1+R}} & S \geq 0,\; E < -50
+\end{cases}
+$$
+
+分级参考：$\leq 0.250$ 极端冷应激，$0.251 \sim 0.820$ 重度冷应激，$0.821 \sim 0.975$ 中度冷应激，$0.976 \sim 1.025$ 热中性，$1.026 \sim 1.180$ 中度热负荷，$1.181 \sim 1.750$ 重度热负荷，$\geq 1.751$ 极端热负荷。
 
 ### 1.5 第二阶段：适应性稳态
 
@@ -183,9 +200,15 @@ $$Q_R = R + L_R$$
 
 **服装内平均辐射温度 iMRT [°C]：**
 
-$$\text{iMRT} = \left[\frac{R + (L_a + L_g) \cdot 0.5 \cdot I_{rc} + 0.5 \cdot L_s}{\varepsilon_h \cdot \sigma}\right]^{0.25} - 273$$
+$$\text{iMRT} = \left[\frac{R + L + L_s}{\varepsilon_h \cdot \sigma}\right]^{0.25} - 273$$
 
-**适应后对对流换热 $C_R$ [W/m²]：**
+其中 $L = (0.5 \cdot L_g + 0.5 \cdot L_a - L_s) \cdot I_{rc}$ 为第一阶段净长波辐射。该公式可展开等价为：
+
+$$\text{iMRT} = \left[\frac{R + (0.5 \cdot L_g + 0.5 \cdot L_a) \cdot I_{rc} + L_s \cdot (1 - I_{rc})}{\varepsilon_h \cdot \sigma}\right]^{0.25} - 273$$
+
+> **注意：** 此公式为修正版，满足边界条件验证：$I_{rc}=0$（完美隔热）时 $\text{iMRT} \to T_s$，$I_{rc}=1$（无服装）且 $\text{MRT}=t$ 时 $\text{iMRT} \to \text{MRT}$。
+
+**适应后对流换热 $C_R$ [W/m²]：**
 
 $$C_R = h_c \cdot (\text{iMRT} - T_{sR}) \cdot I_{rc}$$
 
@@ -216,11 +239,7 @@ $$\text{PST} = \begin{cases}
 \text{iMRT} + \left\lbrace\left[\frac{|S_R|^{0.75}}{\varepsilon_h \cdot \sigma} + 273^4\right]^{0.25} - 273\right\rbrace & S_R \geq 0
 \end{cases}$$
 
-### 1.7 总热损失
-
-$$\text{HeatLoss} = M - S_R = -(Q_R + C_R + E_R + \text{Res})$$
-
-### 1.8 PhS 等级划分
+### 1.7 PhS 等级划分
 
 | PhS 比值范围 | 等级描述 |
 |:---:|:---|
@@ -232,7 +251,7 @@ $$\text{HeatLoss} = M - S_R = -(Q_R + C_R + E_R + \text{Res})$$
 | $4.01 \sim 8.00$ | 重度冷应激 (Great cold strain) |
 | $> 8.00$ | 极端冷应激 (Extreme cold strain) |
 
-### 1.9 PST 热感觉等级
+### 1.8 PST 热感觉等级
 
 | PST [°C] | 热感觉描述 |
 |:---:|:---|
@@ -264,7 +283,7 @@ $$\text{HeatLoss} = M - S_R = -(Q_R + C_R + E_R + \text{Res})$$
 | 3 | VP | VP | hPa | — | 实际水汽压，AutoVP = False 时必需 |
 | 4 | AutoVP | AutoVP | — | true | true 时用 Goff-Gratch 公式自动计算水汽压；false 时直接使用 VP 输入 |
 | 5 | Pressure | P | hPa | 1013.25 | 大气压，为零时使用标准大气压 1013.25 hPa |
-| 6 | MRT | MRT | °C | — | 平均辐射温度，应由外部模块计算提供 |
+| 6 | MRT | MRT | °C | 30.0 | 平均辐射温度，应由外部模块计算提供（如 RayMan 或黑球温度计法） |
 | 7 | CloudCover | CC | % | 0.0 | 云覆盖率 0–100%，AutoTg = true 时用于估算地表温度 |
 | 8 | AutoTg | AutoTg | — | true | true 时按 MENEX_2005 公式由云覆盖率估算 Tg；false 时使用 Tg 输入 |
 | 9 | Tg | Tg | °C | 26.0 | 地表温度，AutoTg = false 时生效 |
@@ -325,7 +344,7 @@ t & N \geq 80\% \\
 | 0 | AutoMet | AutoMet | — | true | true 时按 ISO 8996 简化公式由 WalkSpeed 自动计算 MetRate（忽略 MetRate 输入）；false 时使用 MetRate 并执行一致性检查 |
 | 1 | MetRate | M | W/m² | 135 | 代谢产热率；AutoMet = true 时被忽略；AutoMet = false 时作为绝对值使用 |
 | 2 | WalkSpeed | Vw | m/s | 1.1 | 人体相对于空气的运动速度；同时用于自动计算代谢率（AutoMet = true）；默认约 4 km/h |
-| 3 | AutoClo | AutoClo | — | false | true 时按 MENEX_2005 公式自动调整服装热阻（忽略 CloValue 输入）；false 时使用 CloValue |
+| 3 | AutoClo | AutoClo | — | true | true 时按 MENEX_2005 公式自动调整服装热阻（忽略 CloValue 输入）；false 时使用 CloValue |
 | 4 | CloValue | Icl | clo | 0.8 | 服装热阻，夏季典型值；AutoClo = true 时被忽略 |
 | 5 | AlbedoClo | Alb | % | 30 | 服装表面太阳辐射反照率，典型夏季服装取值，范围 10–90% |
 
@@ -365,10 +384,11 @@ $$M = 58 + 70 \cdot v'$$
 | 索引 | 参数 | 标识 | 说明 |
 |:---:|:---:|:---:|:---|
 | 0 | PST | PST | 生理主观温度 [°C]，15–20 分钟适应后的最终热感觉指标 |
-| 1 | STI | STI | 生理应变指数 [无量纲]，$C/E$ 比值，反映体温调节适应方向和强度 |
-| 2 | PhS | PhS | 生理应变等级文字描述，由 STI 值划分 |
-| 3 | HeatLoss | HL | 人体总热损失 [W/m²]，$\text{HL} = M - S_R$ |
-| 4 | SkinTemp | Ts | 适应后平均皮肤温度 [°C]，$T_{sR}$ |
+| 1 | STI | STI | 主观温度指数 [°C]，反映人体在适应机制触发前主观感受到的热负荷水平 |
+| 2 | PhS | PhS | 生理应变比 [无量纲]，$C/E$ 比值，反映体温调节适应方向和强度 |
+| 3 | PhS_cat | PhS_cat | 生理应变等级文字描述，由 PhS 比值划分 |
+| 4 | HL | HL | 热负荷指数 [无量纲]，反映体温调节中枢系统在适应过程中的负荷状态 |
+| 5 | SkinTemp | Ts_R | 适应后平均皮肤温度 [°C]，$T_{sR}$ |
 
 ---
 

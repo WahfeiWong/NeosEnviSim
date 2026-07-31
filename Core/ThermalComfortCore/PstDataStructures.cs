@@ -33,7 +33,6 @@ namespace ThermalComfort.Core
     }
 
     // Grasshopper wrapper types for custom data transmission between components.
-    // These wrap the plain data classes so they can travel through Grasshopper wires.
     public class GH_PstWeatherSet : GH_Goo<PstWeatherSet>
     {
         public GH_PstWeatherSet() { }
@@ -55,14 +54,16 @@ namespace ThermalComfort.Core
                 VapPres = Value.VapPres,
                 Pressure = Value.Pressure,
                 MRT = Value.MRT,
-                CloudCover = Value.CloudCover
+                CloudCover = Value.CloudCover,
+                AutoTg = Value.AutoTg,   // FIX B3: was missing
+                Tg = Value.Tg            // FIX B3: was missing
             });
         }
 
         public override string ToString()
         {
             if (Value == null) return "Null PST Weather Set";
-            return $"PST Weather [T={Value.AirTemp:F1}C, v={Value.WindSpeed:F1}m/s, e={Value.VapPres:F1}hPa, MRT={Value.MRT:F1}C]";
+            return $"PST Weather [T={Value.AirTemp:F1}C, v={Value.WindSpeed:F1}m/s, e={Value.VapPres:F1}hPa, MRT={Value.MRT:F1}C, AutoTg={(Value.AutoTg ? "Y" : "N")}]";
         }
     }
 

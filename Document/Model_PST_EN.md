@@ -1,10 +1,10 @@
 # PST (Physiological Subjective Temperature) Module
 
-This module calculates the Physiological Subjective Temperature (PST), Physiological Strain Index (STI), Physiological Strain category (PhS), and adapted mean skin temperature (SkinTemp) for the human body in outdoor environments, based on the MENEX_2005 two-step human heat balance model. The model simulates the change in human thermal sensation from initial contact with ambient conditions to after 15–20 minutes of physiological adaptation, through the heat balance equation of metabolic heat production, radiative balance, convective heat exchange, evaporative heat loss, and respiratory heat loss.
+This module calculates the Physiological Subjective Temperature (PST), Subjective Temperature Index (STI), Physiological Strain ratio (PhS), and adapted mean skin temperature (SkinTemp) for the human body in outdoor environments, based on the MENEX_2005 two-step human heat balance model. The model simulates the change in human thermal sensation from initial contact with ambient conditions to after 15–20 minutes of physiological adaptation, through the heat balance equation of metabolic heat production, radiative balance, convective heat exchange, evaporative heat loss, and respiratory heat loss.
 
 The module consists of three components:
 - **PST Weather Settings**: Meteorological parameter configuration component (includes Goff-Gratch vapour pressure calculation and automatic ground temperature estimation)
-- **PST Human Settings**: Human physiological parameter configuration component (includes temperature-adaptive clothing insulation formula)
+- **PST Human Settings**: Human physiological parameter configuration component (includes automatic metabolic rate calculation and temperature-adaptive clothing insulation)
 - **PST Simulator**: Core calculation component implementing the MENEX_2005 two-step heat balance method
 
 ---
@@ -28,7 +28,7 @@ Where:
 ### 1.2 Two-Step Calculation Method
 
 **Step 1 (Initial Steady State):**
-Calculate each heat flux component using the initial skin temperature $T_s$ at contact with ambient conditions. Outputs STI (Subjective Temperature Index) and PhS (physiological strain ratio $C/E$).
+Calculate each heat flux component using the initial skin temperature $T_s$ at contact with ambient conditions. Outputs STI (Subjective Temperature Index), PhS (physiological strain ratio $C/E$), and HL (Heat Load index).
 
 **Step 2 (Adaptive Steady State):**
 Adjust skin temperature based on the evaporative heat loss $E$ from Step 1 (evaporative cooling effect), then recalculate longwave radiation, convection, and evaporation terms using the adjusted skin temperature $T_{sR}$. Absorbed solar radiation $R$, metabolic heat production $M$, and respiratory heat loss $\text{Res}$ remain fixed at their Step 1 values. Outputs PST, PhS category, and adapted skin temperature.
@@ -145,18 +145,35 @@ $$\text{Res} = 0.0014 \cdot M \cdot (t - 35) + 0.0173 \cdot M \cdot (0.1 \cdot e
 
 $$S = M + Q + C + E + \text{Res}$$
 
-**STI (Subjective Temperature Index):**
+**STI (Subjective Temperature Index) [°C]:**
 
 $$\text{STI} = \begin{cases}
 \text{MRT} - \left\lbrace\left[\frac{|S|^{0.75}}{\varepsilon_h \cdot \sigma} + 273^4\right]^{0.25} - 273\right\rbrace & S < 0 \\
 \text{MRT} + \left\lbrace\left[\frac{|S|^{0.75}}{\varepsilon_h \cdot \sigma} + 273^4\right]^{0.25} - 273\right\rbrace & S \geq 0
 \end{cases}$$
 
-**PhS ratio (physiological strain ratio):**
+STI is expressed in °C, representing the thermal load subjectively felt before activation of adaptation processes. Scale reference: $< -38$ extremely cold, $-38 \sim -20.1$ very cold, $-20 \sim -0.5$ cold, $-0.4 \sim 22.5$ cool, $22.6 \sim 31.9$ comfortable, $32 \sim 45.9$ warm, $46 \sim 54.9$ hot, $55 \sim 69.9$ very hot, $\geq 70$ sweltering.
+
+**PhS ratio (physiological strain ratio, dimensionless):**
 
 $$\text{PhS} = \frac{C}{E}$$
 
 When $|E| < 0.001$, sign-dependent extreme values are used (1000 when $E > 0$, -1000 when $E < 0$).
+
+**HL (Heat Load index, dimensionless):**
+
+HL reflects the load on the central thermoregulation system during adaptation, computed from net heat storage $S$ and evaporative heat loss $E$:
+
+$$
+\text{HL} = \begin{cases}
+\left(\frac{S+1000}{1000}\right)^{\frac{5}{1+R}} & S < 0,\; E \geq -50 \\[6pt]
+\left(\frac{S+1000}{1000}\right)^{2 - \frac{1}{1+R}} & S \geq 0,\; E \geq -50 \\[6pt]
+\frac{E}{-50} \cdot \left(\frac{S+1000}{1000}\right)^{\frac{5}{1+R}} & S < 0,\; E < -50 \\[6pt]
+\frac{E}{-50} \cdot \left(\frac{S+1000}{1000}\right)^{2 - \frac{1}{1+R}} & S \geq 0,\; E < -50
+\end{cases}
+$$
+
+Scale reference: $\leq 0.250$ extreme cold stress, $0.251 \sim 0.820$ great cold stress, $0.821 \sim 0.975$ moderate cold stress, $0.976 \sim 1.025$ thermoneutral, $1.026 \sim 1.180$ moderate hot load, $1.181 \sim 1.750$ great hot load, $\geq 1.751$ extreme hot load.
 
 ### 1.5 Step 2: Adaptive Steady State
 
@@ -183,7 +200,13 @@ $$Q_R = R + L_R$$
 
 **Inner mean radiant temperature iMRT [°C]:**
 
-$$\text{iMRT} = \left[\frac{R + (L_a + L_g) \cdot 0.5 \cdot I_{rc} + 0.5 \cdot L_s}{\varepsilon_h \cdot \sigma}\right]^{0.25} - 273$$
+$$\text{iMRT} = \left[\frac{R + L + L_s}{\varepsilon_h \cdot \sigma}\right]^{0.25} - 273$$
+
+where $L = (0.5 \cdot L_g + 0.5 \cdot L_a - L_s) \cdot I_{rc}$ is the net longwave radiation from Step 1. This formula is equivalently expanded as:
+
+$$\text{iMRT} = \left[\frac{R + (0.5 \cdot L_g + 0.5 \cdot L_a) \cdot I_{rc} + L_s \cdot (1 - I_{rc})}{\varepsilon_h \cdot \sigma}\right]^{0.25} - 273$$
+
+> **Note:** This is the corrected formula satisfying boundary condition verification: at $I_{rc}=0$ (perfect insulation) $\text{iMRT} \to T_s$, at $I_{rc}=1$ (no clothing) with $\text{MRT}=t$ $\text{iMRT} \to \text{MRT}$.
 
 **Adapted convective heat exchange $C_R$ [W/m²]:**
 
@@ -216,11 +239,7 @@ $$\text{PST} = \begin{cases}
 \text{iMRT} + \left\lbrace\left[\frac{|S_R|^{0.75}}{\varepsilon_h \cdot \sigma} + 273^4\right]^{0.25} - 273\right\rbrace & S_R \geq 0
 \end{cases}$$
 
-### 1.7 Total Heat Loss
-
-$$\text{HeatLoss} = M - S_R = -(Q_R + C_R + E_R + \text{Res})$$
-
-### 1.8 PhS Categories
+### 1.7 PhS Categories
 
 | PhS Ratio Range | Category Description |
 |:---:|:---|
@@ -232,7 +251,7 @@ $$\text{HeatLoss} = M - S_R = -(Q_R + C_R + E_R + \text{Res})$$
 | $4.01 \sim 8.00$ | Great cold strain |
 | $> 8.00$ | Extreme cold strain |
 
-### 1.9 PST Thermal Sensation Scale
+### 1.8 PST Thermal Sensation Scale
 
 | PST [°C] | Thermal Sensation |
 |:---:|:---|
@@ -264,7 +283,7 @@ Configures meteorological parameters for PST simulation. Supports automatic calc
 | 3 | VP | VP | hPa | — | Actual vapour pressure; required when AutoVP = false |
 | 4 | AutoVP | AutoVP | — | true | If true, calculate vapour pressure from RH using Goff-Gratch; if false, use direct VP input |
 | 5 | Pressure | P | hPa | 1013.25 | Atmospheric pressure; if zero, standard 1013.25 hPa is used |
-| 6 | MRT | MRT | °C | — | Mean radiant temperature; should be calculated externally |
+| 6 | MRT | MRT | °C | 30.0 | Mean radiant temperature; should be calculated externally (e.g., via RayMan or globe thermometer) |
 | 7 | CloudCover | CC | % | 0.0 | Cloud cover 0–100%; used to estimate Tg when AutoTg = true |
 | 8 | AutoTg | AutoTg | — | true | If true, estimate Tg from cloud cover using MENEX_2005 formula; if false, use Tg input |
 | 9 | Tg | Tg | °C | 26.0 | Ground surface temperature; effective when AutoTg = false |
@@ -322,13 +341,24 @@ Configures human physiological parameters for PST simulation. Supports automatic
 
 | Index | Parameter | ID | Unit | Default | Description |
 |:---:|:---:|:---:|:---:|:---:|:---|
-| 0 | MetRate | M | W/m² | 135 | Metabolic heat production; default corresponds to walking 4 km/h (ISO 8996); range 58–400 W/m² |
-| 1 | AutoClo | AutoClo | — | false | If true, auto-adjust clothing insulation by MENEX_2005 formula (ignores CloValue); if false, uses CloValue |
-| 2 | CloValue | Icl | clo | 0.8 | Clothing insulation; summer typical value; ignored when AutoClo = true |
-| 3 | AlbedoClo | Alb | % | 30 | Clothing surface solar reflectance/albedo; typical summer clothing; range 10–90% |
-| 4 | WalkSpeed | Vw | m/s | 1.1 | Velocity of person's motion relative to air; default ~4 km/h walking speed |
+| 0 | AutoMet | AutoMet | — | true | If true (default), metabolic rate is auto-calculated from WalkSpeed using ISO 8996: M = 58 + 70 * v_walk; if false, uses user-specified MetRate with consistency check |
+| 1 | MetRate | M | W/m² | 135 | Metabolic heat production; ignored when AutoMet = true; used as absolute value when AutoMet = false |
+| 2 | WalkSpeed | Vw | m/s | 1.1 | Velocity of person's motion relative to air; also used for auto-calculating metabolic rate (AutoMet = true); default ~4 km/h walking speed |
+| 3 | AutoClo | AutoClo | — | true | If true (default), auto-adjust clothing insulation by MENEX_2005 formula (ignores CloValue); if false, uses CloValue |
+| 4 | CloValue | Icl | clo | 0.8 | Clothing insulation; summer typical value; ignored when AutoClo = true |
+| 5 | AlbedoClo | Alb | % | 30 | Clothing surface solar reflectance/albedo; typical summer clothing; range 10–90% |
 
 > **Note:** Mean skin temperature $T_s$ and skin wettedness $w$ are internal iterative variables of the MENEX_2005 model and are not exposed as inputs.
+
+### 3.3 Automatic Metabolic Rate Calculation (AutoMet)
+
+When `AutoMet = true`, metabolic rate is calculated from walking speed using the ISO 8996 simplified relation:
+
+$$M = 58 + 70 \cdot v'$$
+
+Where $v'$ is walking speed [m/s], $M$ is metabolic heat production [W/m²]. Reference points: $v'=0$ m/s → $M=58$ W/m² (rest), $v'=1.1$ m/s → $M=135$ W/m² (walking 4 km/h). Results clamped to $[58, 400]$ W/m².
+
+When `AutoMet = false`, the user-specified `MetRate` is used. A consistency check warns if the deviation between MetRate and the expected value from WalkSpeed exceeds 30 W/m². Additionally, if WalkSpeed > 2.0 m/s (fast walking or jogging) but MetRate < 160 W/m², a warning is also raised.
 
 ### 3.4 Output Parameters
 
@@ -354,10 +384,11 @@ Configures human physiological parameters for PST simulation. Supports automatic
 | Index | Parameter | ID | Description |
 |:---:|:---:|:---:|:---|
 | 0 | PST | PST | Physiological Subjective Temperature [°C]; final thermal sensation index after 15–20 min adaptation |
-| 1 | STI | STI | Subjective Temperature Index [dimensionless]; $C/E$ ratio indicating direction and intensity of thermoregulatory adaptation |
-| 2 | PhS | PhS | Physiological Strain category string; derived from STI value |
-| 3 | HeatLoss | HL | Total heat loss from the body [W/m²]; $\text{HL} = M - S_R$ |
-| 4 | SkinTemp | Ts | Mean skin temperature after adaptation [°C]; $T_{sR}$ |
+| 1 | STI | STI | Subjective Temperature Index [°C], thermal load felt before activation of adaptation processes |
+| 2 | PhS | PhS | Physiological Strain ratio [dimensionless]; $C/E$ ratio indicating direction and intensity of thermoregulatory adaptation |
+| 3 | PhS_cat | PhS_cat | Physiological Strain category string; derived from PhS ratio |
+| 4 | HL | HL | Heat Load index [dimensionless]; load on central thermoregulation system during adaptation processes |
+| 5 | SkinTemp | Ts_R | Mean skin temperature after adaptation [°C]; $T_{sR}$ |
 
 ---
 

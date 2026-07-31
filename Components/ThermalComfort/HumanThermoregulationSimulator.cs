@@ -1380,10 +1380,14 @@ namespace ThermalComfort
 
             // Report
             int convCount = convList.Count(c => c);
+            if(convCount < n)
+            { 
             AddRuntimeMessage(
-                GH_RuntimeMessageLevel.Remark,
-                $"Fiala batch: {n} items, {convCount} converged."
+                GH_RuntimeMessageLevel.Warning,
+                $"Fiala batch: {n} items, {n -convCount} not converged.\n" +
+                $"For extreme scenarios, the use of alternative thermal comfort models (e.g., PST, PET or UTCI) is advisable"
             );
+            }
 
             // Set outputs as lists
             DA.SetDataList(0, eqtList);    // EqT from Fiala 12-segment model
