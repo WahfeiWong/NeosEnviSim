@@ -67,7 +67,7 @@ namespace ThermalComfort.Core
         public double MetabolicRate { get; set; }  // q_m [W/m3] - basal
         public double BloodFlow { get; set; }      // w_bl [s^-1] - basal perfusion
 
-        // Coefficients for Crank-Nicolson / steady-state matrix
+        // Coefficients for TDMA (implicit Euler / transient)
         public double Alpha { get; set; }          // Left coefficient (r-1 coupling)
         public double Beta { get; set; }           // Center coefficient
         public double Gamma { get; set; }          // Right coefficient (r+1 coupling)
@@ -157,7 +157,7 @@ namespace ThermalComfort.Core
 
     /// <summary>
     /// Simulation base settings - exposes internal parameters for advanced control.
-    /// Reference environment, solver control, and physiology coefficients.
+    /// Reference environment, EqT search, physiology coefficients, and transient control.
     /// All parameters have sensible defaults; override only when needed.
     /// </summary>
     public class SimulationSettings
@@ -168,16 +168,18 @@ namespace ThermalComfort.Core
         public double RefRH { get; set; }          // RH_ref [%]    All standards: 50
         public double RefIcl { get; set; }         // Icl_ref [clo] PET:0.5, UTCI:adaptive, PMV:user
 
-        // --- Solver control ---
-        public int MaxIter { get; set; }           // Max iterations per CoreSolve
-        public double ResidTol { get; set; }       // Blood pool temperature tolerance [K]
-        public double BlpRelax { get; set; }       // Relaxation factor alpha (0.3-0.9)
+        // --- EqT search ---
         public int EqTSearchIter { get; set; }     // Binary search iterations for EqT
 
         // --- Physiology coefficients ---
         public double InsensibleDiff { get; set; } // Baseline skin wetness [-] (Gagge:0.06)
         public double AgeAttenuation { get; set; } // >65 response attenuation factor
         public double SexMetFactor { get; set; }   // Female basal M relative to male (ISO:0.90)
+
+        // --- Transient control ---
+        public double TransientDurationMinutes { get; set; } // Duration of transient simulation [min] (default: 30)
+        public double TransientTimeStep { get; set; }        // Time step for transient simulation [s] (default: 60)
+        public double BlpRelax { get; set; }       // Blood pool relaxation factor for transient solver (default: 0.85)
     }
 
     /// <summary>
@@ -226,11 +228,7 @@ namespace ThermalComfort.Core
         public double Q_metabolism { get; set; }   // [W]
         public double Q_storage { get; set; }      // [W]
 
-        // --- Convergence info ---
-        public int Iterations { get; set; }
-        public double Residual { get; set; }
-        public bool Converged { get; set; }
-    }
+        }
 
     // ========================================================================
     // Grasshopper Goo wrappers for structured data types
@@ -310,8 +308,8 @@ namespace ThermalComfort.Core
         public GH_UtciResultSet() : base(new UtciResultSet()) { }
         public GH_UtciResultSet(UtciResultSet rs) : base(rs) { }
 
-        public override bool IsValid => Value != null && Value.Converged;
-        public override string IsValidWhyNot => IsValid ? "" : "Equivalent temperature did not converge";
+        public override bool IsValid => Value != null;
+        public override string IsValidWhyNot => IsValid ? "" : "Invalid EqT Result Set";
         public override string TypeName => "EqT Result Set";
         public override string TypeDescription => "Complete equivalent temperature simulation results";
 
@@ -327,18 +325,15 @@ namespace ThermalComfort.Core
                 SkinBloodFlow = Value.SkinBloodFlow, SkinWettedness = Value.SkinWettedness,
                 Q_convection = Value.Q_convection, Q_radiation = Value.Q_radiation,
                 Q_evaporation = Value.Q_evaporation, Q_respiration = Value.Q_respiration,
-                Q_metabolism = Value.Q_metabolism, Q_storage = Value.Q_storage,
-                Iterations = Value.Iterations, Residual = Value.Residual, Converged = Value.Converged
+                Q_metabolism = Value.Q_metabolism, Q_storage = Value.Q_storage
             });
         }
 
         public override string ToString()
         {
             if (Value == null) return "Null EqT Result";
-            string status = Value.Converged ? "converged" : "NOT converged";
             return $"EqT Results [EqT={Value.EquivalentTemperature:F1}C, DTS={Value.DTS:F2}, " +
-                   $"Tsk={Value.MeanSkinTemp:F1}C, Tcore={Value.CoreTemp:F1}C, " +
-                   $"iter={Value.Iterations}, {status}]";
+                   $"Tsk={Value.MeanSkinTemp:F1}C, Tcore={Value.CoreTemp:F1}C]";
         }
     }
 
@@ -359,10 +354,12 @@ namespace ThermalComfort.Core
             {
                 RefMetRate = Value.RefMetRate, RefWindSpeed = Value.RefWindSpeed,
                 RefRH = Value.RefRH, RefIcl = Value.RefIcl,
-                MaxIter = Value.MaxIter, ResidTol = Value.ResidTol,
-                BlpRelax = Value.BlpRelax, EqTSearchIter = Value.EqTSearchIter,
+                EqTSearchIter = Value.EqTSearchIter,
                 InsensibleDiff = Value.InsensibleDiff, AgeAttenuation = Value.AgeAttenuation,
-                SexMetFactor = Value.SexMetFactor
+                SexMetFactor = Value.SexMetFactor,
+                TransientDurationMinutes = Value.TransientDurationMinutes,
+                TransientTimeStep = Value.TransientTimeStep,
+                BlpRelax = Value.BlpRelax
             });
         }
 
@@ -371,7 +368,8 @@ namespace ThermalComfort.Core
             if (Value == null) return "Null Simulation Settings";
             return $"SimSettings [Ref: M={Value.RefMetRate:F0}W/m2 v={Value.RefWindSpeed:F1}m/s " +
                    $"RH={Value.RefRH:F0}% Icl={Value.RefIcl:F1}clo, " +
-                   $"Solver: iter={Value.MaxIter} tol={Value.ResidTol:F3}K relax={Value.BlpRelax:F1}]";
+                   $"Transient: {Value.TransientDurationMinutes:F0}min dt={Value.TransientTimeStep:F0}s " +
+                   $"relax={Value.BlpRelax:F1}]";
         }
     }
 

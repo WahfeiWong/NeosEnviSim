@@ -1,11 +1,11 @@
 # Human Thermoregulation Module
 
-This module solves the steady-state human thermal balance using the Fiala multi-segment physiology model (Fiala 1998/2001/2012) and outputs the **Physiological Equivalent Temperature (EqT)** and **Dynamic Thermal Sensation (DTS)**. The human body is discretized into 12 segments with 5 tissue layers each. The bioheat equation is solved iteratively while coupling active thermoregulatory mechanisms including shivering, skin blood flow, and sweating. The equivalent temperature is obtained by matching the internal stress index S between the actual activity level and a reference environment through binary search, enabling comparison across different metabolic rates.
+This module solves the transient approximation method for equivalent temperature using the Fiala multi-segment physiology model (Fiala 1998/2001/2012) and outputs the **Physiological Equivalent Temperature (EqT)** and **Dynamic Thermal Sensation (DTS)**. The human body is discretized into 12 segments with 5 tissue layers each. The transient bioheat equation is solved via implicit Euler time stepping while coupling active thermoregulatory mechanisms including shivering, skin blood flow, and sweating. The equivalent temperature is obtained by running a transient simulation from a neutral state and comparing the thermal strain metric between the actual environment and a reference environment through binary search, enabling comparison across different metabolic rates.
 
 **Current Version Highlights:**
 1. **Fiala 12-segment × 5-layer physiology model**: Head, neck, shoulders, arms, hands, thorax, abdomen, legs, feet, face, forehead, and pelvis; each layer carries tissue properties for brain/lung, bone, muscle, viscera, fat, inner skin, and outer skin.
 2. **Active thermoregulatory system**: Non-linear tanh control equations describe shivering heat production, vasoconstriction, vasodilation, and sweating, with age attenuation and sex-based basal metabolism correction.
-3. **Equivalent temperature EqT calculation**: Based on PET/UTCI reference conditions, binary search matches the internal stress index S so that any activity level can be normalized to the standard reference person.
+3. **Equivalent temperature EqT calculation**: Based on PET/UTCI reference conditions, uses the transient approximation method (configurable duration, default 30 min) solved via implicit Euler time integration, matching the Tsk + 3×Tcore thermal strain metric.
 4. **Optional clothing model**: Supports the UTCI adaptive clothing model (Havenith 2012) or user-specified clothing insulation.
 5. **Parallel batch solving**: Supports parallel computation for multiple weather/human-state combinations.
 
@@ -46,18 +46,20 @@ The 5 tissue layers are:
 
 ### 1.2 Bioheat Equation
 
-Each node satisfies the steady-state bioheat equation:
+Each node satisfies the transient bioheat equation (implicit Euler method):
 
-$$\nabla \cdot (k \nabla T) + q_m + \beta (T_{\text{bla}} - T) = 0$$
+$$\rho c \frac{\partial T}{\partial t} = \nabla \cdot (k \nabla T) + q_m + \beta (T_{\text{bla}} - T)$$
 
 Where:
+- $\rho$: tissue density [kg/m³]
+- $c$: tissue specific heat capacity [J/(kg·K)]
 - $k$: tissue thermal conductivity [W/(m·K)]
 - $q_m$: volumetric heat production rate [W/m³], including basal metabolism, activity heat, and shivering
 - $\beta = \rho_{\text{blood}} c_{\text{blood}} w_{\text{bl}}$: blood-flow heat-capacity coefficient [W/(m³·K)]
 - $T_{\text{bla}}$: arterial blood temperature [°C]
 - $w_{\text{bl}}$: local blood perfusion rate [s⁻¹]
 
-The model uses radial discretization and TDMA (Thomas algorithm) to solve the tridiagonal linear system, with the outermost node coupled to the environmental boundary condition.
+This equation is solved via implicit Euler time stepping (unconditionally stable, configurable time step). The model uses radial discretization and TDMA (Thomas algorithm) to solve the tridiagonal linear system at each time step, with the outermost node coupled to the environmental boundary condition.
 
 ### 1.3 Convective Heat Transfer Coefficient
 
@@ -202,17 +204,19 @@ $$H_{\text{wk}} = (M - 0.8 \times 58.2) \, A_d \, (1 - \eta) - Q_{\text{res}}$$
 
 This heat is distributed uniformly by volume to all tissue layers.
 
-### 1.10 Equivalent Temperature EqT Solver
+### 1.10 Transient Approximation Equivalent Temperature Solver
 
-Equivalent temperature is defined as the air temperature in the reference environment ($M_{\text{ref}}$, $v_{\text{ref}}$, $RH_{\text{ref}}$, $I_{\text{cl,ref}}$) that would produce the same internal stress index $S$ in the reference person as in the actual environment.
+Equivalent temperature is defined as the air temperature in the reference environment ($M_{\text{ref}}$, $v_{\text{ref}}$, $RH_{\text{ref}}$, $I_{\text{cl,ref}}$) that would produce the same thermal strain in the reference person as in the actual environment. In extreme conditions (desert, high humidity, polar), steady-state solutions may not exist; the transient approximation method addresses this by running a finite-duration simulation from a neutral physiological starting state.
 
 Default reference person (UTCI): $M_{\text{ref}} = 135$ W/m², $v_{\text{ref}} = 0.5$ m/s, $RH_{\text{ref}} = 50\%$, $I_{\text{cl,ref}} = 0.5$ clo.
 
 Algorithm:
-1. Solve CoreSolve for the actual environment to obtain $T_{\text{sk}}$, $T_{\text{core}}$, $w_{\text{sk}}$, and compute $S_{\text{actual}}$.
+1. Run a configurable-duration transient simulation (default 30 min, 60 s time step) from neutral state in the actual environment, using implicit Euler time integration, to obtain $T_{\text{sk}}$, $T_{\text{core}}$, and compute the thermal strain metric: $\text{strain} = (T_{\text{sk}} - 34.4) + 3.0 \times (T_{\text{core}} - 37.0)$.
 2. Build the reference person with fixed clothing $I_{\text{cl,ref}}$.
-3. Binary-search the reference air temperature $T_r$ within [-50, 50] °C, solving CoreSolve and computing $S_{\text{ref}}$ each iteration.
-4. The $T_r$ that minimizes $|S_{\text{ref}} - S_{\text{actual}}|$ is the EqT.
+3. Binary-search the reference air temperature $T_r$ within [-50, $\max(T_a, \text{MRT}) + 20$] °C, running the same transient simulation in the reference environment and computing the strain metric each iteration.
+4. The $T_r$ that minimizes the strain difference between the reference and actual environments is the EqT.
+
+Configurable parameters: `TransientDuration` (simulation duration, seconds, default 1800) and `TransientTimeStep` (time step, seconds, default 60) via `SimBaseSet`.
 
 ### 1.11 Dynamic Thermal Sensation DTS
 
@@ -334,13 +338,13 @@ Exposes internal solver parameters for advanced users to override defaults. If n
 | 1 | RefWindSpeed | Vref | m/s | 0.5 | Reference wind speed; UTCI=0.5, PET=0.1 |
 | 2 | RefRH | RHref | % | 50.0 | Reference relative humidity |
 | 3 | RefIcl | Iclref | clo | 0.5 | Reference clothing insulation |
-| 4 | MaxIter | MaxIter | - | 200 | Maximum iterations per CoreSolve |
-| 5 | ResidTol | Tol | K | 0.005 | Blood-pool temperature convergence tolerance |
-| 6 | BlpRelax | Alpha | - | 0.7 | Blood-pool relaxation factor (0.1–1.0) |
-| 7 | EqTSearchIter | EqTN | - | 20 | Binary-search iterations for EqT |
-| 8 | InsensibleDiff | wDiff | - | 0.06 | Baseline skin wetness from insensible perspiration |
-| 9 | AgeAttenuation | AgeAtt | - | 0.75 | Thermoregulatory response attenuation factor for age >65 |
-| 10 | SexMetFactor | SexMet | - | 0.90 | Female basal metabolism as fraction of male |
+| 4 | EqTSearchIter | EqTN | - | 20 | Binary-search iterations for EqT |
+| 5 | InsensibleDiff | wDiff | - | 0.06 | Baseline skin wetness from insensible perspiration |
+| 6 | AgeAttenuation | AgeAtt | - | 0.75 | Thermoregulatory response attenuation factor for age >65 |
+| 7 | SexMetFactor | SexMet | - | 0.90 | Female basal metabolism as fraction of male |
+| 8 | TransientDuration | Tdur | s | 1800 | Transient simulation duration (seconds) |
+| 9 | TransientTimeStep | Tstep | s | 60 | Transient simulation time step (seconds) |
+| 10 | BlpRelax | Alpha | - | 0.85 | Blood-pool relaxation factor (0.1–1.0) |
 
 **Constraints:** Warnings and clamping to reasonable ranges are applied when parameters exceed typical ranges.
 
@@ -381,8 +385,6 @@ Core solver component. Receives structured environmental data, human data, and o
 | 3 | CoreTemp | Tco | Hypothalamus (core) temperature [°C] |
 | 4 | SweatRate | Sw | Total sweat rate [g/min] |
 | 5 | Shivering | Sh | Total shivering heat production [W] |
-| 6 | Iterations | Iter | Number of iterations to convergence |
-| 7 | Converged | Conv | Whether the simulation converged |
 
 ---
 
@@ -395,7 +397,7 @@ The module defines the following core data structures in the `ThermalComfort.Cor
 | `UtciWeatherSet` | Environmental parameter container (Ta, RH, Va, MRT, VP, P) |
 | `UtciHumanSet` | Human/activity parameter container (M, Vw, Posture, Icl, W, H, Age, Sex, etc.) |
 | `SimulationSettings` | Solver and reference environment settings |
-| `UtciResultSet` | Complete result container (EqT, DTS, temperatures, regulatory responses, heat balance components, convergence info) |
+| `UtciResultSet` | Complete result container (EqT, DTS, temperatures, regulatory responses, heat balance components) |
 
 Corresponding Grasshopper Goo wrapper classes:
 
@@ -414,7 +416,7 @@ Corresponding Grasshopper Goo wrapper classes:
 2. **Wind height**: WindSpeed should be at 1.5 m pedestrian height; if a meteorological station 10 m wind speed is provided, convert it using a logarithmic profile first.
 3. **Clothing model**: When AutoClo=true, HumanThermalEnvironment automatically applies the UTCI clothing model based on air temperature; when AutoClo=false, CloValue is used.
 4. **Reference environment**: EqT strongly depends on RefMetRate. When comparing comfort across different activity levels, keep RefMetRate consistent (e.g., UTCI default 135 W/m²).
-5. **Convergence**: Extreme environments (desert, high humidity, polar) may require increasing MaxIter or relaxing ResidTol; failed convergence outputs NaN.
+5. **Transient simulation**: The EqT result depends on the transient simulation duration. Longer durations allow the model to approach steady-state more closely, while shorter durations capture transient effects. The default settings (30 min duration, 60 s step) balance accuracy and computation time.
 6. **Age correction**: AgeAttenuation is applied only when Age > 65 years to model reduced thermoregulatory response in seniors.
 7. **Altitude correction**: Pressure input is used for atmospheric pressure correction affecting convection and evaporation; for high-altitude scenarios, provide the actual atmospheric pressure.
 

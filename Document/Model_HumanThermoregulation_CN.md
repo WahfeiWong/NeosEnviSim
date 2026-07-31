@@ -1,11 +1,11 @@
 # 人体热调节模型（Human Thermoregulation）模块
 
-本模块基于 Fiala 多节段生理模型（Fiala 1998/2001/2012）实现稳态人体热平衡求解，输出**生理等效温度（EqT）**与**动态热感觉（DTS）**。模型将人体离散为 12 个节段、每节段 5 层组织，迭代求解生物热方程（Bioheat Equation），并耦合颤抖、皮肤血流、出汗等主动体温调节机制。等效温度通过在当前活动水平与参考环境之间匹配内部应激指数 S 的二分搜索获得，使结果可跨不同代谢率进行比较。
+本模块基于 Fiala 多节段生理模型（Fiala 1998/2001/2012）采用瞬态逼近法求解等效温度，输出**生理等效温度（EqT）**与**动态热感觉（DTS）**。模型将人体离散为 12 个节段、每节段 5 层组织，迭代求解生物热方程（Bioheat Equation），并耦合颤抖、皮肤血流、出汗等主动体温调节机制。瞬态逼近法在中性初始条件下运行可配置时长的瞬态模拟，通过隐式欧拉法推进生物热方程，避免稳态解在极端条件下可能不存在的问题。等效温度通过在当前活动水平与参考环境之间匹配生理应变指标 S = (Tsk - 34.4) + 3.0×(Tcore - 37.0) 的二分搜索获得，使结果可跨不同代谢率进行比较。
 
 **当前版本要点：**
 1. **Fiala 12 节段 × 5 层生理模型**：头部、颈部、肩部、手臂、手、胸腔、腹部、腿部、足、面部、前额、骨盆，每层包含脑/肺、骨、肌肉、内脏、脂肪、内皮肤、外皮肤等组织属性。
 2. **主动体温调节系统**：非线性 tanh 控制方程描述颤抖产热、血管收缩、血管舒张与出汗散热，并支持年龄衰减与性别基础代谢修正。
-3. **等效温度 EqT 计算**：基于 PET/UTCI 参考环境，通过二分搜索匹配内部应激指数 S，将任意活动水平统一换算到标准参考人体的活动状态。
+3. **等效温度 EqT 计算**：基于 PET/UTCI 参考环境，采用瞬态逼近法，在中性条件下运行可配置时长的瞬态模拟，通过隐式欧拉法求解生物热方程，匹配 Tsk + 3×Tcore 生理应变指标，将任意活动水平统一换算到标准参考人体的活动状态。
 4. **服装模型可选**：支持 UTCI 自适应服装模型（Havenith 2012）或用户手动指定服装热阻。
 5. **并行批量求解**：支持对多个气象/人体状态组合进行并行计算。
 
@@ -44,20 +44,22 @@
 | 3 | 内皮肤层 | 受血管舒张/收缩调控的皮肤血流层 |
 | 4 | 外皮肤层 | 与环境进行对流、辐射、蒸发的界面 |
 
-### 1.2 生物热方程
+### 1.2 瞬态生物热方程（隐式欧拉法）
 
-每个节点满足稳态生物热方程：
+每个节点满足瞬态生物热方程：
 
-$$\nabla \cdot (k \nabla T) + q_m + \beta (T_{\text{bla}} - T) = 0$$
+$$\rho c \frac{\partial T}{\partial t} = \nabla \cdot (k \nabla T) + q_m + \beta (T_{\text{bla}} - T)$$
 
 其中：
+- $\rho$：组织密度 [kg/m³]
+- $c$：组织比热容 [J/(kg·K)]
 - $k$：组织导热系数 [W/(m·K)]
 - $q_m$：组织体积产热率 [W/m³]，包含基础代谢、活动产热与颤抖产热
 - $\beta = \rho_{\text{blood}} c_{\text{blood}} w_{\text{bl}}$：血流热容系数 [W/(m³·K)]
 - $T_{\text{bla}}$：动脉血温度 [°C]
 - $w_{\text{bl}}$：局部血流灌注率 [s⁻¹]
 
-模型采用径向离散与 TDMA（Thomas 算法）求解三对角线性系统，外层节点与环境边界条件耦合。
+模型采用径向离散与 TDMA（Thomas 算法）求解三对角线性系统，外层节点与环境边界条件耦合。采用隐式欧拉时间推进（无条件稳定，支持可配置时间步长）。
 
 ### 1.3 对流换热系数
 
@@ -202,17 +204,27 @@ $$H_{\text{wk}} = (M - 0.8 \times 58.2) \, A_d \, (1 - \eta) - Q_{\text{res}}$$
 
 该产热按体积均匀分配到所有组织层。
 
-### 1.10 等效温度 EqT 求解
+### 1.10 瞬态逼近法等效温度求解
 
-等效温度定义为：在参考环境（$M_{\text{ref}}$、$v_{\text{ref}}$、$RH_{\text{ref}}$、$I_{\text{cl,ref}}$）下，使参考人体产生与实际环境相同内部应激指数 $S$ 的空气温度。
+等效温度定义为：在参考环境（$M_{\text{ref}}$、$v_{\text{ref}}$、$RH_{\text{ref}}$、$I_{\text{cl,ref}}$）下，使参考人体产生与实际环境相同生理应变指标 $S$ 的空气温度。
 
 参考人体默认（UTCI）：$M_{\text{ref}} = 135$ W/m²，$v_{\text{ref}} = 0.5$ m/s，$RH_{\text{ref}} = 50\%$，$I_{\text{cl,ref}} = 0.5$ clo。
 
+在极端环境条件下，稳态生物热方程可能不存在物理可行的解。为此，本模块采用瞬态逼近法替代稳态求解：
+
 算法流程：
-1. 在实际环境下求解 CoreSolve，得到 $T_{\text{sk}}$、$T_{\text{core}}$、$w_{\text{sk}}$，并计算 $S_{\text{actual}}$。
+1. 在实际环境下，从中性初始状态（$T_{\text{sk,0}} = 34.4$ °C，$T_{\text{core,0}} = 37.0$ °C）运行可配置时长的瞬态模拟（默认 30 分钟，时间步长 60 秒），通过隐式欧拉法求解瞬态生物热方程，得到 $T_{\text{sk}}$、$T_{\text{core}}$，并计算生理应变指标 $S_{\text{actual}}$。
 2. 构建参考人体，服装固定为 $I_{\text{cl,ref}}$。
-3. 在 [-50, 50] °C 范围内二分搜索参考空气温度 $T_r$，每次求解 CoreSolve 并计算 $S_{\text{ref}}$。
+3. 在 $[0, \max(T_a, \text{MRT}) + 20]$ °C 范围内二分搜索参考空气温度 $T_r$，每次执行瞬态模拟并计算 $S_{\text{ref}}$。
 4. 当 $|S_{\text{ref}} - S_{\text{actual}}|$ 最小时，$T_r$ 即为 EqT。
+
+生理应变指标定义为：
+
+$$S = (T_{\text{sk}} - 34.4) + 3.0 \times (T_{\text{core}} - 37.0)$$
+
+可配置参数：
+- `TransientDuration`：瞬态模拟时长（秒，默认 1800）
+- `TransientTimeStep`：瞬态模拟时间步长（秒，默认 60）
 
 ### 1.11 动态热感觉 DTS
 
@@ -334,13 +346,13 @@ $$\log_{10} p_{\text{sat}} = -7.90298 \left(\frac{T_{\text{st}}}{T} - 1\right) +
 | 1 | RefWindSpeed | Vref | m/s | 0.5 | 参考风速，UTCI=0.5，PET=0.1 |
 | 2 | RefRH | RHref | % | 50.0 | 参考相对湿度 |
 | 3 | RefIcl | Iclref | clo | 0.5 | 参考服装热阻 |
-| 4 | MaxIter | MaxIter | - | 200 | 单次 CoreSolve 最大迭代次数 |
-| 5 | ResidTol | Tol | K | 0.005 | 血池温度收敛容差 |
-| 6 | BlpRelax | Alpha | - | 0.7 | 血池温度松弛因子（0.1–1.0） |
-| 7 | EqTSearchIter | EqTN | - | 20 | EqT 二分搜索迭代次数 |
-| 8 | InsensibleDiff | wDiff | - | 0.06 | 不感蒸发基础皮肤湿润度 |
-| 9 | AgeAttenuation | AgeAtt | - | 0.75 | >65 岁体温调节响应衰减系数 |
-| 10 | SexMetFactor | SexMet | - | 0.90 | 女性基础代谢相对男性比例 |
+| 4 | EqTSearchIter | EqTN | - | 20 | EqT 二分搜索迭代次数 |
+| 5 | InsensibleDiff | wDiff | - | 0.06 | 不感蒸发基础皮肤湿润度 |
+| 6 | AgeAttenuation | AgeAtt | - | 0.75 | >65 岁体温调节响应衰减系数 |
+| 7 | SexMetFactor | SexMet | - | 0.90 | 女性基础代谢相对男性比例 |
+| 8 | TransientDuration | TDur | s | 1800 | 瞬态模拟时长（秒） |
+| 9 | TransientTimeStep | TStep | s | 60 | 瞬态模拟时间步长（秒） |
+| 10 | BlpRelax | Alpha | - | 0.85 | 血池温度松弛因子（0.1–1.0） |
 
 **参数约束：** 各参数超出典型范围时发出警告并截断到合理区间。
 
@@ -381,8 +393,6 @@ $$\log_{10} p_{\text{sat}} = -7.90298 \left(\frac{T_{\text{st}}}{T} - 1\right) +
 | 3 | CoreTemp | Tco | 下丘脑（核心）温度 [°C] |
 | 4 | SweatRate | Sw | 总出汗率 [g/min] |
 | 5 | Shivering | Sh | 总颤抖产热 [W] |
-| 6 | Iterations | Iter | 收敛迭代次数 |
-| 7 | Converged | Conv | 是否收敛 |
 
 ---
 
@@ -395,12 +405,12 @@ $$\log_{10} p_{\text{sat}} = -7.90298 \left(\frac{T_{\text{st}}}{T} - 1\right) +
 | `UtciWeatherSet` | 环境参数容器（Ta、RH、Va、MRT、VP、P） |
 | `UtciHumanSet` | 人体/活动参数容器（M、Vw、Posture、Icl、W、H、Age、Sex 等） |
 | `SimulationSettings` | 求解器与参考环境设置 |
-| `UtciResultSet` | 完整结果容器（EqT、DTS、温度、调节响应、热平衡分量、收敛信息） |
+| `UtciResultSet` | 完整结果容器（EqT、DTS、温度、调节响应、热平衡分量） |
 
 对应的 Grasshopper Goo 包装类：
 
 | Goo 类 | 类型名称 | 说明 |
-|:---:|:---:|:---|
+|:---:|:---:|:---:|
 | `GH_UtciWeatherSet` | UTCI Weather Set | 环境数据在 Grasshopper 线缆中的封装 |
 | `GH_UtciHumanSet` | UTCI Human Set | 人体数据在 Grasshopper 线缆中的封装 |
 | `GH_SimulationSettings` | Simulation Settings | 基础设置在 Grasshopper 线缆中的封装 |
@@ -414,9 +424,9 @@ $$\log_{10} p_{\text{sat}} = -7.90298 \left(\frac{T_{\text{st}}}{T} - 1\right) +
 2. **风速高度**：WindSpeed 应为 1.5 m 行人高度风速；若输入为气象站 10 m 风速，需先按对数廓线转换。
 3. **服装模型**：AutoClo=true 时，HumanThermalEnvironment 组件会自动根据空气温度调用 UTCI 服装模型；AutoClo=false 时采用 CloValue。
 4. **参考环境**：EqT 强烈依赖 RefMetRate。比较不同活动水平的舒适度时，建议保持 RefMetRate 一致（如 UTCI 默认 135 W/m²）。
-5. **收敛性**：极端环境（沙漠、高湿、极地）可能需要增大 MaxIter 或放宽 ResidTol；若收敛失败，输出为 NaN。
-6. **年龄修正**：仅当 Age > 65 岁时才应用 AgeAttenuation，模拟老年人体温调节响应下降。
-7. **海拔修正**：Pressure 输入用于大气压修正，影响对流与蒸发；高海拔场景建议输入实际大气压。
+5. **年龄修正**：仅当 Age > 65 岁时才应用 AgeAttenuation，模拟老年人体温调节响应下降。
+6. **海拔修正**：Pressure 输入用于大气压修正，影响对流与蒸发；高海拔场景建议输入实际大气压。
+7. **瞬态模拟时长**：瞬态模拟时长（TransientDuration）影响等效温度对初始条件的记忆效应。较短的模拟时长（如 10 分钟）可能保留更多初始中性状态的惯性，较长的模拟时长（如 60 分钟）使结果更接近稳态。在极端环境条件下建议适当延长模拟时长。
 
 ---
 
