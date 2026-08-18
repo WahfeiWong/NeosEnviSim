@@ -57,7 +57,8 @@ namespace ThermalComfort
                 "Full sphere sample count for view factors (default 1000)", GH_ParamAccess.item, 1000);
 
             pManager.AddNumberParameter("Longwave Coeff", "LwCoeff",
-                "SolarCal longwave linearization coefficient, default 0.5", GH_ParamAccess.item, 0.5);
+                "SolarCal longwave linearization coefficient. 1.0 = physically correct first-order " +
+                "value (default).", GH_ParamAccess.item, 1.0);
 
             pManager.AddNumberParameter("Ground Emissivity", "EpsGrd",
                 "Ground surface longwave emissivity [-]. ONLY used by RayMan model (ignored in SolarCal). " +
@@ -87,7 +88,7 @@ namespace ThermalComfort
             int exposureSamples = 3;
             double analysisHeight = 1.5, bodyHeight = 1.7, skyEmissivity = -1.0;
             int svfSampleCount = 1000;
-            double longwaveCoeff = 0.5;
+            double longwaveCoeff = 1.0;
             double groundEmissivity = 0.95, obstacleEmissivity = 0.95;
 
             DA.GetData(0, ref useRayMan);

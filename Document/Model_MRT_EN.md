@@ -2,7 +2,14 @@
 
 This module calculates the Mean Radiant Temperature (MRT) for the human body in outdoor environments. It is based on backward ray-tracing building/vegetation occlusion analysis and supports both the SolarCal (ASHRAE 55) and RayMan calculation models. Full-sphere (4π) view factors are decomposed into **five components** (sky, ground, opaque obstacles, trees, translucent shades), and both longwave and diffuse radiation are computed per component, achieving physically correct radiative environment modeling.
 
-**Current Version Highlights (2026-06-16):**
+**4π Convention Physical Corrections (2026-08-18):**
+1. **Shortwave 0.5 double-count removed**: the diffuse and ground-reflected terms no longer carry a ½ factor — the five-component view factors are full-sphere (4π) normalized (open sky $F_{\text{SVF}} = 0.5$, components sum to 1), so the hemisphere share of the human body is already embedded in them. ASHRAE 55 App C writes 0.5·f_svv because its f_svv is hemisphere-normalized (open sky = 1); the two conventions are equivalent via $F_{\text{SVF}}(4\pi) = f_{\text{svv}}/2$. The legacy extra ½ halved diffuse + reflected absorption under the 4π convention (≈10 K underestimate at open-site clear-sky noon).
+2. **RayMan branch restructured**: shortwave enters the quartic synthesis exactly once — no nested view-factor multiplication (legacy $I_{\text{DH,eff}}$ already contained $F_{\text{SVF}}$ and was multiplied by it again, effectively $F_{\text{SVF}}^2$), tree/translucent diffuse weighted by their own TVF/TRVF (previously mis-slotted into the sky bucket), and the whole shortwave block is now gated by `IncludeShortwave` (the legacy RayMan branch ignored this switch).
+3. **Sky effective temperature now blackbody-based**: $T_{\text{sky}} = (I_{\text{IR}}/\sigma)^{0.25}$ — no division by $\varepsilon_{\text{sky}}$ (EPW horizontal infrared is the measured downwelling irradiance; the emissivity effect is already contained in the measurement). The legacy inversion re-emitted with body emissivity, inflating sky longwave by $\varepsilon/\varepsilon_{\text{sky}} \approx 1.1$–$1.27$.
+4. **Longwave linearization coefficient $c_{\text{lw}}$ defaults to 1.0** (first-order exact value of the $T^4$ expansion; the legacy 0.5 halved all longwave departures); SimulationConfigs and MRTsettings component defaults synchronized.
+5. **Numerical hardening & performance**: DNI/DHI/GHI entry sanitation, IR missing-value clear-sky fallback, sky temperature clamped to [200, 340] K, output clamped to [−60, 90] °C; canopy characteristic thickness computed once outside the 8760 h loop (new optional `canopyThicknessOverride` parameter); SPA-failure fallback branch output realignment.
+
+**Previous Enhancement (2026-06-16):**
 1. **Five-component view factor decomposition**: SVF / GVF / OVF_opaque / TVF / TRVF are mutually exclusive and satisfy conservation; overlapping directions are classified by priority Opaque > TreeDetail > TranslucentShade.
 2. **Five-component longwave decomposition**: sky, ground, opaque obstacles, tree canopy, and translucent shade each contribute an independent longwave term with its own surface temperature.
 3. **Surface temperatures moved to the ObsSet component**: the Tsur input has been removed from the MRT component; opaque surface temperature (T_opaque), tree canopy temperature (T_tree), and translucent surface temperature (T_trans) are provided via the ObsSet component as a single value or an 8760-hourly series, falling back to air temperature when omitted.
@@ -24,7 +31,9 @@ Based on the SolarCal model from ASHRAE Standard 55, combining the shortwave sol
 
 The solar radiation flux received by the human body consists of direct radiation, diffuse radiation, and ground-reflected radiation:
 
-$$I_{\text{body}} = f_{\text{DNI}} \cdot f_p(\gamma) \cdot I_{\text{DN}} + \frac{1}{2} f \cdot I_{\text{DH,eff}} + \frac{1}{2} f \cdot F_{\text{GVF}} \cdot \rho_g \cdot I_{\text{GH}}$$
+$$I_{\text{body}} = f_{\text{DNI}} \cdot f_p(\gamma) \cdot I_{\text{DN}} + f \cdot I_{\text{DH,eff}} + f \cdot F_{\text{GVF}} \cdot \rho_g \cdot I_{\text{GH}}$$
+
+> **4π Convention Correction (2026-08-18):** The legacy formula carried a ½ factor on both the diffuse and ground-reflected terms, which conflicts with the 4π view-factor convention — the five-component view factors are **full-sphere normalized** (open sky $F_{\text{SVF}} = 0.5$, conservation sum = 1), so the geometric hemisphere share of the human body is **already embedded in $F_{\text{SVF}}$**; multiplying by ½ again double-counts it. In ASHRAE 55 App C, $\frac{1}{2} f \cdot f_{\text{svv}}$ uses a **hemisphere-normalized** $f_{\text{svv}}$ (open sky = 1); with $F_{\text{SVF}}(4\pi) = f_{\text{svv}}/2$ the two conventions are equivalent.
 
 **Effective diffuse irradiance (five-component decomposition):**
 
@@ -66,7 +75,7 @@ The MRT increment due to longwave radiation is computed separately for each of t
 $$\Delta T_{\text{lw}} = c_{\text{lw}} \cdot \left[ F_{\text{SVF}} (T_{\text{sky}} - T_{\text{ref}}) + F_{\text{GVF}} (T_g - T_{\text{ref}}) + F_{\text{OVF,opaque}} (T_{\text{opaque}} - T_{\text{ref}}) + F_{\text{TVF}} (T_{\text{canopy}} - T_{\text{ref}}) + F_{\text{TRVF}} (T_{\text{trans}} - T_{\text{ref}}) \right]$$
 
 Where:
-- $c_{\text{lw}}$: Longwave linearization coefficient (default 0.5)
+- $c_{\text{lw}}$: Longwave linearization coefficient (default **1.0**). A first-order expansion of $T_{\text{MRT}}^4 = \sum_i F_i T_i^4$ about the reference temperature $T_a$ yields exactly 1.0; the legacy default 0.5 halved all longwave departures (compressing the cold-sky term, biasing night-time MRT warm). Setting 0.5 exactly reproduces legacy results (LwCoeff input of MRTsettings)
 - $T_{\text{ref}}$: Reference temperature, equal to the air temperature $T_a$ [°C]
 
 View factors, surface temperatures, and their data sources for each component:
@@ -111,17 +120,15 @@ $$f_p(\gamma) = 0.308 \cdot \cos\gamma \cdot \left(0.998 - \frac{\gamma^2}{50000
 
 Where $\gamma$ is the solar altitude angle [°].
 
-**Sky Effective Temperature:**
+**Sky Effective Temperature (2026-08-18 blackbody correction):**
 
-$$T_{\text{sky}} = \left( \frac{I_{\text{IR}}}{\varepsilon_{\text{sky}} \cdot \sigma} \right)^{0.25} - 273.15$$
+$$T_{\text{sky}} = \left( \frac{I_{\text{IR}}}{\sigma} \right)^{0.25} - 273.15$$
 
-Where $I_{\text{IR}}$ is the horizontal infrared radiation [W/m²], $\sigma = 5.67 \times 10^{-8}$ W/(m²·K⁴).
+Where $I_{\text{IR}}$ is the EPW horizontal infrared radiation intensity [W/m²] — it is itself the **measured hemispheric downwelling longwave irradiance** (equivalent-blackbody convention; the sky emissivity effect is already contained in the measurement), so the inversion **no longer divides by** $\varepsilon_{\text{sky}}$. The legacy path first inverted $(I_{\text{IR}}/\varepsilon_{\text{sky}}\sigma)^{0.25}$ and then re-emitted with the body emissivity $\varepsilon$, inflating the sky longwave by $\varepsilon/\varepsilon_{\text{sky}} \approx 1.1$–$1.27$ (on clear nights the SolarCal sky term can even flip sign, e.g. −3.9 K computed as +2.8 K).
 
-When $\varepsilon_{\text{sky}} < 0$ (auto mode, default), dew point temperature is used:
+Numerical handling: missing/invalid $I_{\text{IR}}$ (NaN/Inf/≤0) falls back to a clear-sky estimate $\sigma(T_a - 15\,\text{K})^4$; the result is clamped to [200, 340] K.
 
-$$\varepsilon_{\text{sky}} = 0.711 + 0.56 \cdot \frac{T_d}{100} + 0.73 \cdot \left(\frac{T_d}{100}\right)^2$$
-
-Where $T_d$ is the dew point temperature [°C], and the result is constrained within [0.5, 1.0]. If dew point data is missing, total sky cover is used instead ($\varepsilon_{\text{sky}} = 0.75 + 0.02 N$, where $N$ is the total sky cover, also constrained to [0.5, 1.0]); if both are missing, $\varepsilon_{\text{sky}} = 1.0$ (blackbody sky).
+> **SkyEps parameter status:** The SkyEps input of MRTsettings is retained for interface compatibility (the dew-point auto-estimation logic still runs in OutdoorMRT and is stored in the config), but as of 2026-08-18 it **no longer participates** in the sky temperature inversion — diagnostic only, recommended for removal in a future version.
 
 ### 1.2 RayMan Model
 
@@ -133,11 +140,11 @@ $$T_{\text{MRT}} = (\text{mrtK}_4)^{0.25} - 273.15$$
 
 Where:
 
-$$\text{mrtK}_4 = \frac{1}{\sigma} \left[ \left( L_{\text{sky}} + \frac{\alpha}{\varepsilon} I_{\text{DH,eff}} \right) F_{\text{SVF}} + \left( L_g + \frac{\alpha}{\varepsilon} \rho_g I_{\text{GH}} \right) F_{\text{GVF}} + L_{\text{obs}} F_{\text{OVF,opaque}} + L_{\text{tree}} F_{\text{TVF}} + L_{\text{trans}} F_{\text{TRVF}} \right] + \frac{\alpha \cdot I_{\text{direct}}}{\varepsilon \cdot \sigma}$$
+$$\text{mrtK}_4 = \frac{1}{\sigma} \left( I_{\text{IR}} \cdot F_{\text{SVF}} + L_g \cdot F_{\text{GVF}} + L_{\text{obs}} \cdot F_{\text{OVF,opaque}} + L_{\text{tree}} \cdot F_{\text{TVF}} + L_{\text{trans}} \cdot F_{\text{TRVF}} \right) + \frac{\alpha}{\varepsilon \cdot \sigma} \left( I_{\text{DH,eff}} + \rho_g \cdot I_{\text{GH}} \cdot F_{\text{GVF}} + f_{\text{DNI}} \cdot f_p(\gamma) \cdot I_{\text{DN}} \right)$$
 
-Longwave radiation in each direction (all temperatures in Kelvin):
+> **4π Convention Correction (2026-08-18):** The three shortwave terms enter the quartic synthesis **exactly once** — no nested view-factor multiplication (the legacy code multiplied $I_{\text{DH,eff}}$, which already contains $F_{\text{SVF}}$, by $F_{\text{SVF}}$ again, effectively $F_{\text{SVF}}^2$ = 0.25 for open sky where 0.5 is correct), tree/translucent diffuse weighted by their own $F_{\text{TVF}}/F_{\text{TRVF}}$ (previously mis-slotted into the sky bucket), and no ½ factor (the hemisphere share is already inside the 4π view factors). The sky longwave slot uses the measured $I_{\text{IR}}$ directly (no $\varepsilon_{\text{sky}}$ inversion, no re-emission with body emissivity $\varepsilon$). The shortwave block is gated by `IncludeShortwave` (the legacy RayMan branch ignored this switch, gating only the direct term on $I_{\text{DN}} > 0$).
 
-$$L_{\text{sky}} = \varepsilon \cdot \sigma \cdot T_{\text{sky,K}}^4$$
+Longwave radiation in each direction (all temperatures in Kelvin; the sky slot uses the measured $I_{\text{IR}}$ directly — there is no separate $L_{\text{sky}}$ term):
 
 $$L_g = \varepsilon_g \cdot \sigma \cdot T_{g,\text{K}}^4$$
 
@@ -148,14 +155,14 @@ $$L_{\text{tree}} = \varepsilon_{\text{obs}} \cdot \sigma \cdot T_{\text{canopy,
 $$L_{\text{trans}} = \varepsilon_{\text{obs}} \cdot \sigma \cdot T_{\text{trans,K}}^4$$
 
 Where:
-- $T_{\text{sky,K}}$: Sky effective temperature [K] derived from $I_{\text{IR}}$ and $\varepsilon_{\text{sky}}$; the sky longwave term is weighted by the body emissivity $\varepsilon$ as absorbed by the human body
+- $I_{\text{IR}}$: EPW horizontal infrared radiation [W/m²] (measured downwelling longwave irradiance), used directly as the sky-slot longwave input; missing/invalid values fall back to a clear-sky estimate $\sigma(T_a - 15\,\text{K})^4$
 - $\varepsilon_g$: Ground longwave emissivity (EpsGrd in MRT Settings, default 0.95)
 - $\varepsilon_{\text{obs}}$: Obstacle longwave emissivity (EpsObs in MRT Settings, default 0.95); **shared by all three obstacle surface categories: opaque objects, tree canopy, and translucent shade**
 - $T_{\text{opaque,K}}$, $T_{\text{canopy,K}}$, $T_{\text{trans,K}}$: Surface temperatures [K] of the three obstacle categories, sourced the same way as in SolarCal (via the ObsSet component; fallback to $T_a$ when not provided)
 - $I_{\text{DH,eff}}$: Effective diffuse irradiance from the five-component decomposition (same formula as SolarCal, see Section 1.1)
 - The ground-reflected shortwave term $\rho_g I_{\text{GH}}$ is applied to the ground direction only ($F_{\text{GVF}}$)
 
-Direct solar radiation term (applied only when $I_{\text{DN}} > 0$ and $f_{\text{DNI}} > 0$):
+Direct solar radiation term (as of 2026-08-18 gated by `IncludeShortwave` together with the other shortwave terms; $I_{\text{DN}}$ is sanitized at entry and is naturally 0 at night / when missing):
 
 $$I_{\text{direct}} = f_{\text{DNI}} \cdot f_p(\gamma) \cdot I_{\text{DN}}$$
 
@@ -163,7 +170,18 @@ $$I_{\text{direct}} = f_{\text{DNI}} \cdot f_p(\gamma) \cdot I_{\text{DN}}$$
 
 ### 1.3 Unified Entry Point
 
-The `CalculateMRT()` method automatically selects one of the above two models based on the `useRayMan` parameter.
+The `CalculateMRT()` method automatically selects one of the above two models based on the `useRayMan` parameter. All three public methods (`CalculateMRT` / `CalculateMRT_SolarCal` / `CalculateMRT_RayMan`) gained an optional trailing parameter `canopyThicknessOverride = double.NaN`: when not NaN, the caller-supplied precomputed canopy thickness is used directly (performance optimization, see Section 1.4); when NaN, the legacy per-call computation applies (backward compatible, zero interface change).
+
+### 1.4 Numerical Hardening and Robustness (2026-08-18)
+
+| Defense Layer | Measure | Description |
+|:---:|:---|:---|
+| Entry sanitation | `CleanIrradiance()` | NaN/Inf/negative DNI/DHI/GHI → 0 (guards against EPW 9999 missing values and radiation-file parse failures) |
+| Missing fallback | `ResolveDownwellingIR()` | Missing/invalid horizontal infrared → clear-sky estimate $\sigma(T_a - 15\,\text{K})^4$ |
+| Computation | View-factor conservation | Five components normalized directly from Fibonacci direction counts, $\sum F_i = 1$ |
+| Output clamping | `ClampMRT()` | $T_{\text{sky}}$ clamped to [200, 340] K; MRT clamped to [−60, 90] °C; NaN/Inf → 15 °C |
+
+**Performance (2026-08-18):** The canopy characteristic thickness $l$ (Z-extent of the merged bounding box of all simplified canopy meshes) is a geometric invariant; it is computed **once** by the OutdoorMRT component outside the 8760 h × N-point loop and passed in via `canopyThicknessOverride`. The legacy code recomputed the bounding box every hour for every point — 876,000 redundant computations for 100 points over a full year.
 
 ---
 
@@ -373,6 +391,8 @@ $$z_i = \sqrt{1 - \frac{i}{N}}, \quad i = 0, 1, \ldots, N-1$$
 |:---:|:---:|:---|
 | 16 | SunVec | Solar vector for each analysis time step (List) |
 
+> **Note (2026-08-18):** During SPA (solar position algorithm) failure fallback hours, all outputs are still emitted item by item as in the normal path (MRT = air temperature, all radiation decomposition terms = 0), keeping the five-component longwave decomposition complete for every hour and point — the legacy fallback branch was missing the dTlw_tree / dTlw_trans outputs, which shifted branch-index-aligned downstream consumers by one hour; this is now fixed.
+
 ---
 
 ## 4. MRT Settings Component (MRTsettings.cs)
@@ -390,11 +410,13 @@ $$z_i = \sqrt{1 - \frac{i}{N}}, \quad i = 0, 1, \ldots, N-1$$
 | Exposure Samples | NExp | - | 3 | Number of ray tracing sampling points for exposure factor |
 | Eye Height for SVF | HSVF | m | 1.5 | Eye height for view factor calculation |
 | Body Height | HBod | m | 1.7 | Total human body height |
-| Sky Emissivity | SkyEps | - | -1 | Sky emissivity, -1=auto (dew point calculation) |
+| Sky Emissivity | SkyEps | - | -1 | Sky emissivity (retained for compatibility; as of 2026-08-18 no longer used in the sky temperature inversion, dew-point auto estimate is diagnostic only) |
 | SVF Sample Count | SVF_N | - | 1000 | Full 4π sphere sample count |
-| Longwave Coeff | LwCoeff | - | 0.5 | Longwave linearization coefficient |
+| Longwave Coeff | LwCoeff | - | 1.0 | Longwave linearization coefficient; 1.0 = physically correct first-order value (default), 0.5 = reproduces legacy halved behavior |
 | Ground Emissivity | EpsGrd | - | 0.95 | Ground longwave emissivity (RayMan only) |
 | Obstacle Emissivity | EpsObs | - | 0.95 | Obstacle longwave emissivity (RayMan only; shared by opaque, tree canopy, and translucent surfaces) |
+
+> **Upgrade Migration Note (2026-08-18):** Grasshopper saves explicitly set input values inside the canvas file. If LwCoeff was saved as 0.5 in an existing canvas, it **will still pass 0.5** after recompiling — manually set it back to 1.0 or disconnect and reconnect the input; newly placed components automatically pick up the new default of 1.0.
 
 ---
 
@@ -469,3 +491,5 @@ All 10 inputs are optional.
 3. Matzarakis, A., Rutz, F., & Mayer, H. (2010). Modelling radiation fluxes in simple and complex environments: basics of the RayMan model. *International Journal of Biometeorology*, 54, 131-139. https://doi.org/10.1007/s00484-009-0261-5
 
 4. ISO 7726:1998. Ergonomics of the thermal environment — Instruments for measuring physical quantities. International Organization for Standardization, Geneva, 1998.
+
+5. Thorsson, S., Lindberg, F., Eliasson, I., & Holmer, B. (2007). Different methods for estimating the mean radiant temperature in an outdoor urban setting. *International Journal of Climatology*, 27(14), 1983-1993. https://doi.org/10.1002/joc.1537

@@ -469,6 +469,13 @@ namespace ThermalComfort
             List<double> hourlyAvgMRT = new List<double>(numHours);
             List<Vector3d> sunVectors = new List<Vector3d>();
 
+            // P-8 FIX (2026-08-18): canopy characteristic thickness is geometry-invariant.
+            // Compute it ONCE here and pass it down; previously MRTModel recomputed the
+            // canopy bounding box every hour x every point inside the 8760 h loop.
+            double cachedCanopyThickness = obstacleSet != null
+                ? HumanExposureModel.CalculateCanopyCharacteristicThickness(obstacleSet.TreeCanopyMeshes)
+                : 0.0;
+
             AddRuntimeMessage(GH_RuntimeMessageLevel.Remark,
                 $"Calculating MRT for {numHours}h (HOY {startHoy}-{endHoy}), " +
                 $"{mrtConfig.ExposureSamplePoints} exposure samples, " +
@@ -515,6 +522,11 @@ namespace ThermalComfort
                         dTLwSkyTree.Append(new GH_Number(0.0), new GH_Path(p));
                         dTLwGroundTree.Append(new GH_Number(0.0), new GH_Path(p));
                         dTLwObsTree.Append(new GH_Number(0.0), new GH_Path(p));
+                        // P-6 FIX (2026-08-18): keep the two remaining longwave decomposition
+                        // trees aligned with the normal path (10 trees per hour per point),
+                        // otherwise downstream index-aligned consumers shift by one hour.
+                        dTLwTreeTree.Append(new GH_Number(0.0), new GH_Path(p));
+                        dTLwTranslucentTree.Append(new GH_Number(0.0), new GH_Path(p));
                     }
                     hourlyAvgMRT.Add(record.DryBulbTemperature);
                     sunVectors.Add(Vector3d.Unset);
@@ -669,7 +681,8 @@ namespace ThermalComfort
                         treeViewFactors[p], translucentViewFactors[p],
                         dniExposureFactors[p], solarAltitude, hourConfig, hourConfig.UseRayManModel,
                         obstacleSet,
-                        pointObstacleTemp, pointTreeCanopyTemp, pointTranslucentTemp);
+                        pointObstacleTemp, pointTreeCanopyTemp, pointTranslucentTemp,
+                        cachedCanopyThickness);
 
                     // FIVE-COMPONENT longwave decomposition (opaque + tree + translucent)
                     double surfaceTemp = pointAirTemp;
@@ -680,7 +693,7 @@ namespace ThermalComfort
                     if (hourConfig.IncludeLongwave)
                     {
                         double skyTemp = MRTModel.CalculateSkyTemperature(record.HorizontalInfraredRadiation, effectiveSkyEps);
-                        double lwCoeff = hourConfig.LongwaveLinearCoeff > 0 ? hourConfig.LongwaveLinearCoeff : 0.5;
+                        double lwCoeff = hourConfig.LongwaveLinearCoeff > 0 ? hourConfig.LongwaveLinearCoeff : 1.0;
                         double groundTemp = pointGroundTemp ?? surfaceTemp;
 
                         deltaT_lw_sky = lwCoeff * skyViewFactors[p] * (skyTemp - refTemp);

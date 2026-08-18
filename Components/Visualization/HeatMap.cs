@@ -47,9 +47,9 @@ namespace NeosVisualization
             pManager.AddMeshParameter("Mesh", "M", "Input Mesh", GH_ParamAccess.item);
             pManager.AddIntegerParameter("Contour Count", "C", "Number of contour lines", GH_ParamAccess.item, 10);
             pManager.AddBooleanParameter("Contour Label Enable", "CE", "Enable contour line value labels", GH_ParamAccess.item, false);
-            pManager.AddNumberParameter("Contour Label Height", "CLH", "Height of contour label text in model units", GH_ParamAccess.item, 0.15);
+            pManager.AddNumberParameter("Contour Label Height", "CLH", "Height of contour label text in model units", GH_ParamAccess.item, 1.0);
             pManager.AddIntegerParameter("Legend Segments", "LS", "Number of color segments in the legend bar (default 10)", GH_ParamAccess.item, 10);
-            pManager.AddNumberParameter("Legend Text Height", "LTH", "Height of legend text in model units", GH_ParamAccess.item, 0.15);
+            pManager.AddNumberParameter("Legend Text Height", "LTH", "Height of legend text in model units", GH_ParamAccess.item, 1.0);
             pManager.AddTextParameter("Legend Title", "LT", "Title displayed above the color legend", GH_ParamAccess.item, "Value");
         }
 

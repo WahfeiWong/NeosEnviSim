@@ -16,10 +16,10 @@
 
 	<PropertyGroup>
 		<!-- Specifies information for Assembly and Yak -->
-		<Version>1.9.7.5</Version>
+		<Version>1.9.7.6</Version>
 		<Title>NeosEnviSim</Title>
 		<Company>Wahfai Wong (Huafei Huang)</Company>
-		<Description>Tools for building environment simulation with Grasshopper</Description>
+		<Description>Tools for building environmental simulation in Grasshopper</Description>
 		<RootNamespace>NeosEnviSim</RootNamespace>
 		<AssemblyTitle>NeosEnviSim</AssemblyTitle>
 		<ApplicationIcon>icon_NeosEnviSim.ico</ApplicationIcon>

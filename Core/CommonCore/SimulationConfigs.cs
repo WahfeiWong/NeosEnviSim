@@ -562,7 +562,14 @@ namespace Common.Core
         public bool UseRayManModel { get; set; } = false;
         public int SVFSampleCount { get; set; } = 1000;
         public double SkyEmissivity { get; set; } = -1.0;
-        public double LongwaveLinearCoeff { get; set; } = 0.5;
+        /// <summary>
+        /// Linearization coefficient of the SolarCal longwave correction
+        /// deltaT_lw = coeff * SUM(F_i * (T_i - T_air)).
+        /// 4PI CORRECTED (2026-08-18): first-order expansion of
+        /// T_mrt^4 = SUM(F_i * T_i^4) gives coeff = 1.0; the legacy default
+        /// 0.5 halved all longwave departures (cold-night bias).
+        /// </summary>
+        public double LongwaveLinearCoeff { get; set; } = 1.0;
 
         /// <summary>
         /// Ground surface longwave emissivity [-].

@@ -2,7 +2,14 @@
 
 本模块用于计算室外环境中人体的平均辐射温度（MRT），基于反向光线追踪的建筑/植被遮挡分析，支持 SolarCal（ASHRAE 55）和 RayMan 两种计算模型。采用全 4π 球面视角因子**五分量分解**（天空、地面、不透光障碍物、树木、半透明遮阳），长波辐射与漫射辐射均按分解后的视角因子逐类计算，实现物理上正确的辐射环境建模。
 
-**当前版本要点（2026-06-16）：**
+**4π 口径物理修正（2026-08-18）：**
+1. **消除短波 0.5 双计**：漫射与地面反射项去除 ½ 系数——五分量视角因子为全球面（4π）归一（开敞天空 $F_{\text{SVF}} = 0.5$，五分量守恒和为 1），人体半球份额已隐含其中。ASHRAE 55 App C 写作 0.5·f_svv 因其 f_svv 为半球归一口径（开敞=1），换算关系 $F_{\text{SVF}}(4\pi) = f_{\text{svv}}/2$，两种口径下公式等价。旧版在 4π 口径下使漫射与地面反射吸收减半（晴午开敞短波合计低估约 10 K）。
+2. **RayMan 分支重构**：短波项一次性进入四次方合成——无嵌套视角因子乘法（旧版 $I_{\text{DH,eff}}$ 内含 $F_{\text{SVF}}$ 又被外层再乘一次，实际为 $F_{\text{SVF}}^2$），树/半透明方向漫射按各自 TVF/TRVF 加权（旧版错入天空槽），并统一受 `IncludeShortwave` 门控（旧版忽略该开关）。
+3. **天空等效温度改为黑体口径**：$T_{\text{sky}} = (I_{\text{IR}}/\sigma)^{0.25}$，不再除以 $\varepsilon_{\text{sky}}$——EPW 水平红外为实测下行辐照度，发射率效应已含于测量值；旧版反演后再以人体发射率计入吸收，净高估 $\varepsilon/\varepsilon_{\text{sky}} \approx 1.1$–$1.27$。
+4. **长波线性化系数 $c_{\text{lw}}$ 默认 1.0**（$T^4$ 一阶展开的精确值；旧默认 0.5 使所有长波偏差减半）；SimulationConfigs 与 MRTsettings 组件默认值同步修改。
+5. **数值加固与性能**：DNI/DHI/GHI 入口清洗、IR 缺测晴空回退、天空温度钳位 [200, 340] K、输出钳位 [−60, 90] °C；树冠特征厚度在 8760 h 循环外一次性计算（新增 `canopyThicknessOverride` 可选尾参）；SPA 失败回退分支补齐两个长波分解输出。
+
+**历史增强（2026-06-16）：**
 1. **五分量视角因子分解**：SVF / GVF / OVF_opaque / TVF / TRVF 互斥划分，满足守恒；重叠方向按 不透光 > 树木细节 > 半透明遮阳 优先级归类。
 2. **五分量长波辐射分解**：天空、地面、不透光障碍物、树木冠层、半透明遮阳各自独立计算长波贡献，每类表面温度独立配置。
 3. **表面温度输入移至 ObsSet 组件**：MRT 组件的 Tsur 输入端已移除；不透光表面温度（T_opaque）、树冠温度（T_tree）、半透明表面温度（T_trans）由 ObsSet 组件提供，支持单值或 8760 逐时序列，未输入时回退为空气温度。
@@ -24,7 +31,9 @@
 
 人体接收的太阳辐射通量由直接辐射、散射辐射和地面反射三部分组成：
 
-$$I_{\text{body}} = f_{\text{DNI}} \cdot f_p(\gamma) \cdot I_{\text{DN}} + \frac{1}{2} f \cdot I_{\text{DH,eff}} + \frac{1}{2} f \cdot F_{\text{GVF}} \cdot \rho_g \cdot I_{\text{GH}}$$
+$$I_{\text{body}} = f_{\text{DNI}} \cdot f_p(\gamma) \cdot I_{\text{DN}} + f \cdot I_{\text{DH,eff}} + f \cdot F_{\text{GVF}} \cdot \rho_g \cdot I_{\text{GH}}$$
+
+> **4π 口径修正（2026-08-18）：** 旧版漫射与地面反射项各乘 ½，与 4π 视角因子口径冲突——五分量视角因子为**全球面归一**（开敞天空 $F_{\text{SVF}} = 0.5$，守恒和为 1），人体对上半球的几何份额**已隐含在 $F_{\text{SVF}}$ 内**，再乘 ½ 即双计。ASHRAE 55 App C 的 $\frac{1}{2} f \cdot f_{\text{svv}}$ 中 $f_{\text{svv}}$ 为**半球归一**（开敞=1），$F_{\text{SVF}}(4\pi) = f_{\text{svv}}/2$，两种口径等价。
 
 **有效漫射辐照度（五分量分解）：**
 
@@ -66,7 +75,7 @@ $$\Delta T_{\text{sw}} = \frac{I_{\text{body}} \cdot (\alpha / \varepsilon)}{f \
 $$\Delta T_{\text{lw}} = c_{\text{lw}} \cdot \left[ F_{\text{SVF}} (T_{\text{sky}} - T_{\text{ref}}) + F_{\text{GVF}} (T_g - T_{\text{ref}}) + F_{\text{OVF,opaque}} (T_{\text{opaque}} - T_{\text{ref}}) + F_{\text{TVF}} (T_{\text{canopy}} - T_{\text{ref}}) + F_{\text{TRVF}} (T_{\text{trans}} - T_{\text{ref}}) \right]$$
 
 其中：
-- $c_{\text{lw}}$：长波线性化系数（默认 0.5）
+- $c_{\text{lw}}$：长波线性化系数（默认 **1.0**）。对 $T_{\text{MRT}}^4 = \sum_i F_i T_i^4$ 在参考温度 $T_a$ 处做一阶展开，正确系数为 1.0；旧默认 0.5 使所有长波偏差项减半（晴夜冷天空项被压缩、夜间 MRT 偏暖）。设 0.5 可精确复现旧版结果（MRTsettings 组件 LwCoeff 输入）
 - $T_{\text{ref}}$：参考温度，取空气温度 $T_a$ [°C]
 
 各分量的视角因子、表面温度及其数据来源：
@@ -111,17 +120,15 @@ $$f_p(\gamma) = 0.308 \cdot \cos\gamma \cdot \left(0.998 - \frac{\gamma^2}{50000
 
 其中 $\gamma$ 为太阳高度角 [°]。
 
-**天空等效温度：**
+**天空等效温度（2026-08-18 黑体口径修正）：**
 
-$$T_{\text{sky}} = \left( \frac{I_{\text{IR}}}{\varepsilon_{\text{sky}} \cdot \sigma} \right)^{0.25} - 273.15$$
+$$T_{\text{sky}} = \left( \frac{I_{\text{IR}}}{\sigma} \right)^{0.25} - 273.15$$
 
-其中 $I_{\text{IR}}$ 为水平面红外辐射 [W/m²]，$\sigma = 5.67 \times 10^{-8}$ W/(m²·K⁴)。
+其中 $I_{\text{IR}}$ 为 EPW 水平面红外辐射强度 [W/m²]——它本身就是**实测的半球下行长波辐照度**（等效黑体口径，天空发射率效应已含于测量值），因此反演**不再除以** $\varepsilon_{\text{sky}}$。旧版先做 $(I_{\text{IR}}/\varepsilon_{\text{sky}}\sigma)^{0.25}$ 反演、随后又以人体发射率 $\varepsilon$ 计入吸收，净高估天空长波 $\varepsilon/\varepsilon_{\text{sky}} \approx 1.1$–$1.27$（晴夜 SolarCal 天空项符号可能翻转，如 −3.9 K 算成 +2.8 K）。
 
-当 $\varepsilon_{\text{sky}} < 0$（自动模式，默认）时，使用露点温度计算：
+数值处理：$I_{\text{IR}}$ 缺失/无效（NaN/Inf/≤0）时回退晴空估计 $\sigma(T_a - 15\,\text{K})^4$ 反演；结果钳位于 [200, 340] K。
 
-$$\varepsilon_{\text{sky}} = 0.711 + 0.56 \cdot \frac{T_d}{100} + 0.73 \cdot \left(\frac{T_d}{100}\right)^2$$
-
-其中 $T_d$ 为露点温度 [°C]，结果被约束在 [0.5, 1.0] 范围内。若露点数据缺失，则回退为按总云量估算（$\varepsilon_{\text{sky}} = 0.75 + 0.02 N$，$N$ 为总云量，同样约束在 [0.5, 1.0]）；两者均缺失时取 $\varepsilon_{\text{sky}} = 1.0$（黑体天空）。
+> **SkyEps 参数现状：** MRTsettings 的 SkyEps 输入保留用于接口兼容（露点自动估算逻辑仍在 OutdoorMRT 中执行并存入 config），但 2026-08-18 起**不再参与**天空温度反演，仅作诊断用途，建议后续版本移除。
 
 ### 1.2 RayMan 模型
 
@@ -133,11 +140,11 @@ $$T_{\text{MRT}} = (\text{mrtK}_4)^{0.25} - 273.15$$
 
 其中：
 
-$$\text{mrtK}_4 = \frac{1}{\sigma} \left[ \left( L_{\text{sky}} + \frac{\alpha}{\varepsilon} I_{\text{DH,eff}} \right) F_{\text{SVF}} + \left( L_g + \frac{\alpha}{\varepsilon} \rho_g I_{\text{GH}} \right) F_{\text{GVF}} + L_{\text{obs}} F_{\text{OVF,opaque}} + L_{\text{tree}} F_{\text{TVF}} + L_{\text{trans}} F_{\text{TRVF}} \right] + \frac{\alpha \cdot I_{\text{direct}}}{\varepsilon \cdot \sigma}$$
+$$\text{mrtK}_4 = \frac{1}{\sigma} \left( I_{\text{IR}} \cdot F_{\text{SVF}} + L_g \cdot F_{\text{GVF}} + L_{\text{obs}} \cdot F_{\text{OVF,opaque}} + L_{\text{tree}} \cdot F_{\text{TVF}} + L_{\text{trans}} \cdot F_{\text{TRVF}} \right) + \frac{\alpha}{\varepsilon \cdot \sigma} \left( I_{\text{DH,eff}} + \rho_g \cdot I_{\text{GH}} \cdot F_{\text{GVF}} + f_{\text{DNI}} \cdot f_p(\gamma) \cdot I_{\text{DN}} \right)$$
 
-各方向长波辐射（温度均为开尔文）：
+> **4π 口径修正（2026-08-18）：** 短波三项**一次性**进入四次方合成——不再嵌套乘视角因子（旧版将内含 $F_{\text{SVF}}$ 的 $I_{\text{DH,eff}}$ 又乘一次 $F_{\text{SVF}}$，实际为 $F_{\text{SVF}}^2$，开敞时 0.25 而正确值为 0.5），树/半透明方向漫射按各自 $F_{\text{TVF}}/F_{\text{TRVF}}$ 加权（旧版错入天空槽），且无 ½ 系数（4π 口径下 hemisphere 份额已在视角因子内）。天空长波槽直接使用实测 $I_{\text{IR}}$（不再经 $\varepsilon_{\text{sky}}$ 反演、不再以人体发射率 $\varepsilon$ 重发射）。短波块统一受 `IncludeShortwave` 门控（旧版 RayMan 分支忽略该开关，仅按 $I_{\text{DN}}>0$ 判断直射项）。
 
-$$L_{\text{sky}} = \varepsilon \cdot \sigma \cdot T_{\text{sky,K}}^4$$
+各方向长波辐射（温度均为开尔文；天空槽直接使用实测 $I_{\text{IR}}$，无单独的 $L_{\text{sky}}$ 项）：
 
 $$L_g = \varepsilon_g \cdot \sigma \cdot T_{g,\text{K}}^4$$
 
@@ -148,14 +155,14 @@ $$L_{\text{tree}} = \varepsilon_{\text{obs}} \cdot \sigma \cdot T_{\text{canopy,
 $$L_{\text{trans}} = \varepsilon_{\text{obs}} \cdot \sigma \cdot T_{\text{trans,K}}^4$$
 
 其中：
-- $T_{\text{sky,K}}$：由 $I_{\text{IR}}$ 与 $\varepsilon_{\text{sky}}$ 反演的天空等效温度 [K]；天空长波项以人体发射率 $\varepsilon$ 计入人体吸收
+- $I_{\text{IR}}$：EPW 水平面红外辐射 [W/m²]（实测下行长波辐照度），直接作为天空槽长波输入；缺失/无效时回退晴空估计 $\sigma(T_a - 15\,\text{K})^4$
 - $\varepsilon_g$：地面长波发射率（MRT Settings 的 EpsGrd，默认 0.95）
 - $\varepsilon_{\text{obs}}$：障碍物长波发射率（MRT Settings 的 EpsObs，默认 0.95）；**不透光障碍物、树木冠层与半透明遮阳三类表面共用该发射率**
 - $T_{\text{opaque,K}}$、$T_{\text{canopy,K}}$、$T_{\text{trans,K}}$：三类障碍物表面温度 [K]，来源与 SolarCal 相同（ObsSet 组件，未输入时回退为 $T_a$）
 - $I_{\text{DH,eff}}$：五分量分解的有效漫射辐照度（公式同 SolarCal，见第 1.1 节）
 - 地面反射短波项 $\rho_g I_{\text{GH}}$ 仅计入地面方向（$F_{\text{GVF}}$）
 
-直接太阳辐射项（仅当 $I_{\text{DN}} > 0$ 且 $f_{\text{DNI}} > 0$ 时）：
+直接太阳辐射项（2026-08-18 起与其他短波项统一受 `IncludeShortwave` 门控；$I_{\text{DN}}$ 经入口清洗，缺测/夜间自然为 0）：
 
 $$I_{\text{direct}} = f_{\text{DNI}} \cdot f_p(\gamma) \cdot I_{\text{DN}}$$
 
@@ -163,7 +170,18 @@ $$I_{\text{direct}} = f_{\text{DNI}} \cdot f_p(\gamma) \cdot I_{\text{DN}}$$
 
 ### 1.3 统一入口
 
-`CalculateMRT()` 方法根据 `useRayMan` 参数自动选择上述两种模型之一。
+`CalculateMRT()` 方法根据 `useRayMan` 参数自动选择上述两种模型之一。三个公共方法（`CalculateMRT` / `CalculateMRT_SolarCal` / `CalculateMRT_RayMan`）尾部均新增可选参数 `canopyThicknessOverride = double.NaN`：非 NaN 时直接采用调用方预先计算的树冠特征厚度（性能优化，见 1.4 节），NaN 时回退逐次计算（兼容旧调用，接口零变动）。
+
+### 1.4 数值加固与稳健性（2026-08-18）
+
+| 防线 | 措施 | 说明 |
+|:---:|:---|:---|
+| 入口清洗 | `CleanIrradiance()` | DNI/DHI/GHI 的 NaN/Inf/负值 → 0（防御 EPW 9999 缺测与辐射文件解析失败） |
+| 缺测回退 | `ResolveDownwellingIR()` | 水平红外缺失/无效 → 晴空估计 $\sigma(T_a - 15\,\text{K})^4$ |
+| 计算加固 | 视角因子守恒 | 五分量由 Fibonacci 方向计数直接归一，$\sum F_i = 1$ |
+| 出口钳位 | `ClampMRT()` | $T_{\text{sky}}$ 钳位于 [200, 340] K；MRT 钳位于 [−60, 90] °C；NaN/Inf → 15 °C |
+
+**性能优化（2026-08-18）：** 树冠特征厚度 $l$（所有树冠简化模型合并包围盒的 Z 向高度）是几何不变量，由 OutdoorMRT 组件在 8760 h × N 点主循环**外**计算一次，经 `canopyThicknessOverride` 参数传入；旧版每小时每点重复计算包围盒，8760 h × 100 点即 87.6 万次冗余计算。
 
 ---
 
@@ -373,6 +391,8 @@ $$z_i = \sqrt{1 - \frac{i}{N}}, \quad i = 0, 1, \ldots, N-1$$
 |:---:|:---:|:---|
 | 16 | SunVec | 每个分析时刻的太阳向量（List） |
 
+> **注意（2026-08-18）：** SPA（太阳位置算法）计算失败的回退小时内，全部输出端仍按正常路径逐项输出（MRT 取空气温度、各辐射分解项为 0），长波五分量分解保持每小时每点齐全——旧版回退分支缺 dTlw_tree / dTlw_trans 两项输出，会使按分支索引对齐的下游组件串位一小时，现已补齐。
+
 ---
 
 ## 4. MRT 设置组件（MRTsettings.cs）
@@ -390,11 +410,13 @@ $$z_i = \sqrt{1 - \frac{i}{N}}, \quad i = 0, 1, \ldots, N-1$$
 | Exposure Samples | NExp | - | 3 | 暴露因子射线追踪采样点数 |
 | Eye Height for SVF | HSVF | m | 1.5 | 视角系数计算眼高度 |
 | Body Height | HBod | m | 1.7 | 人体总高度 |
-| Sky Emissivity | SkyEps | - | -1 | 天空发射率，-1=自动（露点计算） |
+| Sky Emissivity | SkyEps | - | -1 | 天空发射率（保留兼容；2026-08-18 起不再参与天空温度反演，露点自动估算仅存诊断） |
 | SVF Sample Count | SVF_N | - | 1000 | 全 4π 球面采样数 |
-| Longwave Coeff | LwCoeff | - | 0.5 | 长波线性化系数 |
+| Longwave Coeff | LwCoeff | - | 1.0 | 长波线性化系数；1.0=一阶物理正确值（默认），0.5=复现旧版减半行为 |
 | Ground Emissivity | EpsGrd | - | 0.95 | 地面长波发射率（仅 RayMan 使用） |
 | Obstacle Emissivity | EpsObs | - | 0.95 | 障碍物长波发射率（仅 RayMan 使用；不透光、树冠、半透明三类表面共用） |
+
+> **升级迁移提示（2026-08-18）：** Grasshopper 会将显式设置过的输入值保存进画布文件。旧画布中 LwCoeff 若已被保存为 0.5，覆盖编译后**仍会传入 0.5**——需手动改回 1.0 或删除该输入重新连接；新放置的组件自动取新默认 1.0。
 
 ---
 
@@ -469,3 +491,5 @@ ObsSet 组件用于创建分类障碍物设置集（`ObstacleSet`），为 MRT �
 3. Matzarakis, A., Rutz, F., & Mayer, H. (2010). Modelling radiation fluxes in simple and complex environments: basics of the RayMan model. *International Journal of Biometeorology*, 54, 131-139. https://doi.org/10.1007/s00484-009-0261-5
 
 4. ISO 7726:1998. Ergonomics of the thermal environment — Instruments for measuring physical quantities. International Organization for Standardization, Geneva, 1998.
+
+5. Thorsson, S., Lindberg, F., Eliasson, I., & Holmer, B. (2007). Different methods for estimating the mean radiant temperature in an outdoor urban setting. *International Journal of Climatology*, 27(14), 1983-1993. https://doi.org/10.1002/joc.1537
