@@ -12,7 +12,7 @@ namespace NeosUtility
         public PVPanelProcessorComponent()
           : base("PV Panel Processor", "PVPanel",
               "Subdivides a base surface into PV panels with scaling, rotation, and translation capabilities.",
-              "Neos", "Utility")
+              "Neos", "GeomTools")
         {
         }
 

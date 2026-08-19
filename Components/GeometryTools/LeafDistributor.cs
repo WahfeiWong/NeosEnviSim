@@ -18,7 +18,7 @@ namespace NeosUtility
           : base("Leaf Distributor", "Leaf",
               "Distribute leaf clusters onto a tree mesh. " +
               "Builds a convex hull from branch geometry and populates leaf clusters on the hull surface.",
-              "Neos", "Utility")
+              "Neos", "GeomTools")
         {
         }
 

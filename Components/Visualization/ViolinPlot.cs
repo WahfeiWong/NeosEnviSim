@@ -11,8 +11,8 @@ namespace NeosVisualization
     public class ViolinPlotCombinationComponent : GH_Component
     {
         public ViolinPlotCombinationComponent()
-          : base("Violin Plot Plus",
-                 "VPS",
+          : base("Violin Plot",
+                 "ViolinP",
                  "Generates violin plots from multiple datasets with background grid",
                  "Neos",
                  "Visualization")

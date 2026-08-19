@@ -25,7 +25,7 @@ namespace NeosUtility
               "Convert Brep or Surface faces into meshes with per-face borders, centers and normals. " +
               "Quad Only = false uses Rhino gridded meshing (quad + tri at boundaries). " +
               "Quad Only = true produces pure quads with gaps at irregular edges.",
-              "Neos", "Utility")
+              "Neos", "GeomTools")
         {
         }
 

@@ -74,8 +74,8 @@ namespace ThermalComfort
         private const double DEFAULT_PRESSURE_KPA = 101.325;
 
         public ConvertWtoRHComponent()
-          : base("ConvertWtoRH",
-                 "W to RH",
+          : base("w-RH",
+                 "w-RH",
                  "Convert humidity ratio (mixing ratio) to relative humidity",
                  "Neos",
                  "Thermophysics")
@@ -87,7 +87,7 @@ namespace ThermalComfort
             // Input 0: Humidity ratio (W)
             pManager.AddNumberParameter(
                 name: "Humidity Ratio",
-                nickname: "W",
+                nickname: "w",
                 description: "Humidity ratio (mixing ratio) [kg/kg]. This is the mass of water vapour per unit mass of dry air." +
                 "\nTypical range: 0 to 0.04 kg/kg (0 to 40 g/kg) for normal air.",
                 access: GH_ParamAccess.item);

@@ -75,7 +75,7 @@
 	  <None Remove="obj\**" />
 	</ItemGroup>
 	<ItemGroup>
-	  <Compile Remove="Components\Utility\Point Grid.cs" />
+	  <Compile Remove="Components\GeometryTools\Point Grid.cs" />
 	</ItemGroup>
 	<ItemGroup>
 		<Content Include=".vscode\launch.json" />

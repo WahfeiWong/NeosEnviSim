@@ -16,7 +16,7 @@ namespace NeosUtility
           : base("Tree Generator", "Tree",
               "Generate a recursive tree with branch mesh and branch lines output. " +
               "Inputs DG and LG accept number lists (e.g., from Graph Mapper + Range).",
-              "Neos", "Utility")
+              "Neos", "GeomTools")
         {
         }
 
